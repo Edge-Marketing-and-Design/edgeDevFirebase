@@ -1,6 +1,6 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.0.19",
+  "version": "1.0.20",
   "description": "Composables and stores for firebase",
   "main": "index.ts",
   "scripts": {

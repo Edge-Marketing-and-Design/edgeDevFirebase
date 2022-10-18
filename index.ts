@@ -30,9 +30,9 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
-const auth = getAuth(app);
 
 export const signIn = async (credentials: Credentials): Promise<object> => {
+  const auth = getAuth(app);
   const user = await signInWithEmailAndPassword(
     auth,
     credentials.email,
