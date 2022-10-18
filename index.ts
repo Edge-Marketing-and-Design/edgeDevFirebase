@@ -11,6 +11,7 @@ import {
   onSnapshot,
   WhereFilterOp,
   QueryConstraint,
+  Unsubscribe,
   where
 } from "firebase/firestore";
 
@@ -30,41 +31,38 @@ const db = getFirestore(app);
 
 // Simple Store Items (add matching key per firebase collection)
 export const data: CollectionDataObject = reactive({});
-export const unsubscibe: CollectionDataObject = reactive({});
-export const user: UserDataObject = ref({});
+export const unsubscibe: CollectionUnsubscribeObject = reactive({});
+export const user: UserDataObject = reactive({ uid: null, email: "" });
 
 // Composable to start snapshot listener and set unsubscribe function
 export const startSnapshot = (
   collectionPath: string,
   queryList: FirestoreQuery[] = []
 ): void => {
-  // This first "if" is to prevent multiple listeners on the same collection
-  if (!(data[collectionPath] instanceof Function)) {
-    const queryConditions: QueryConstraint[] = queryList.map((condition) =>
-      where(condition.field, condition.operator, condition.value)
-    );
-    const q = query(collection(db, collectionPath), ...queryConditions);
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = {};
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.docId = doc.id;
-        items[doc.id] = item;
-      });
-      data[collectionPath] = items;
-    });
-    unsubscibe[collectionPath] = unsubscribe;
+  if (data[collectionPath] instanceof Function) {
+    stopSnapshot(collectionPath);
   }
+  const queryConditions: QueryConstraint[] = queryList.map((condition) =>
+    where(condition.field, condition.operator, condition.value)
+  );
+  const q = query(collection(db, collectionPath), ...queryConditions);
+  const unsubscribe = onSnapshot(q, (querySnapshot) => {
+    const items = {};
+    querySnapshot.forEach((doc) => {
+      const item = doc.data();
+      item.docId = doc.id;
+      items[doc.id] = item;
+    });
+    data[collectionPath] = items;
+  });
+  unsubscibe[collectionPath] = unsubscribe;
 };
 
 export const storeDoc = (collectionPath: string, item: object): void => {
   const cloneItem = JSON.parse(JSON.stringify(item));
   const current_time = new Date().getTime();
   cloneItem.last_updated = current_time;
-  cloneItem.uid = null;
-  if (Object.prototype.hasOwnProperty.call(user, "uid")) {
-    cloneItem.uid = user.uid;
-  }
+  cloneItem.uid = user.uid;
   if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
     cloneItem.doc_created_at = current_time;
   }
@@ -98,10 +96,15 @@ interface FirestoreQuery {
   value: unknown;
 }
 
+interface CollectionUnsubscribeObject {
+  [key: string]: Unsubscribe;
+}
+
 interface CollectionDataObject {
-  [key: string] : object
+  [key: string]: object;
 }
 
 interface UserDataObject {
-  [key: any] : any
+  uid: string | null;
+  email: string;
 }
