@@ -1,0 +1,31 @@
+{
+  "name": "@edgedev/firebase",
+  "version": "1.0.17",
+  "description": "Composables and stores for firebase",
+  "main": "index.ts",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "Seth Fischer",
+  "license": "ISC",
+  "publishConfig": {
+    "access": "public"
+  },
+  "devDependencies": {
+    "@types/node": "^18.11.0",
+    "@typescript-eslint/eslint-plugin": "^5.40.0",
+    "@typescript-eslint/parser": "^5.40.0",
+    "eslint": "^8.25.0",
+    "eslint-config-prettier": "^8.5.0",
+    "prettier": "^2.7.1",
+    "typescript": "^4.8.4",
+    "vite": "^3.1.8",
+    "vue": "^3.2.41"
+  },
+  "dependencies": {
+    "firebase": "^9.12.1",
+    "vue": "^3.0.0",
+    "vite": "^3.1.8"
+  },
+  "peerDependencies": {}
+}
