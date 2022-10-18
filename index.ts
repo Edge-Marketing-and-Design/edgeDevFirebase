@@ -29,9 +29,9 @@ const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
 // Simple Store Items (add matching key per firebase collection)
-export const data: object = reactive({});
-export const unsubscibe: object = reactive({});
-export const user: object = ref({});
+export const data: CollectionDataObject = reactive({});
+export const unsubscibe: CollectionDataObject = reactive({});
+export const user: UserDataObject = ref({});
 
 // Composable to start snapshot listener and set unsubscribe function
 export const startSnapshot = (
@@ -63,7 +63,7 @@ export const storeDoc = (collectionPath: string, item: object): void => {
   cloneItem.last_updated = current_time;
   cloneItem.uid = null;
   if (Object.prototype.hasOwnProperty.call(user, "uid")) {
-    cloneItem.uid = user["uid"];
+    cloneItem.uid = user.uid;
   }
   if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
     cloneItem.doc_created_at = current_time;
@@ -96,4 +96,12 @@ interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
   value: unknown;
+}
+
+interface CollectionDataObject {
+  [key: string] : object
+}
+
+interface UserDataObject {
+  [key: any] : any
 }
