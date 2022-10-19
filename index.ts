@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { reactive, ref } from "vue";
+import { reactive, ref, watch } from "vue";
 
 import {
   getFirestore,
@@ -15,7 +15,31 @@ import {
   where
 } from "firebase/firestore";
 
-// import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+
+interface FirestoreQuery {
+  field: string;
+  operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
+  value: unknown;
+}
+
+interface CollectionUnsubscribeObject {
+  [key: string]: Unsubscribe;
+}
+
+interface CollectionDataObject {
+  [key: string]: object;
+}
+
+interface UserDataObject {
+  uid: string | null;
+  email: string;
+}
+
+interface Credentials {
+  email: string;
+  password: string;
+}
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -29,24 +53,38 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-// const auth = getAuth(app);
-// console.log(auth);
+
+// const isBrowser = typeof window !== "undefined";
+// let auth: Auth | null = null;
+// if (isBrowser) {
+const auth = getAuth(app);
+// }
 const db = getFirestore(app);
 
-// export const signIn = async (credentials: Credentials): Promise<object> => {
-//   const user = await signInWithEmailAndPassword(
-//     auth,
-//     credentials.email,
-//     credentials.password
-//   );
-//   console.log(user);
-//   return user;
-// };
+export const signIn = (credentials: Credentials): void => {
+  signInWithEmailAndPassword(auth, credentials.email, credentials.password)
+    .then((userCredential) => {
+      user.value = {
+        email: userCredential.user.email,
+        uid: userCredential.user.uid
+      };
+      console.log(userCredential.user);
+    })
+    .catch((error) => {
+      console.log(error.code);
+      console.log(error.message);
+    });
+  console.log(user.value);
+};
 
 // Simple Store Items (add matching key per firebase collection)
 export const data: CollectionDataObject = reactive({});
 export const unsubscibe: CollectionUnsubscribeObject = reactive({});
-export const user = ref<UserDataObject>({ uid: "", email: "" });
+export const user = ref<UserDataObject>({ uid: null, email: "" });
+
+watch(user, () => {
+  console.log("user changed", user);
+});
 
 // Composable to start snapshot listener and set unsubscribe function
 export const startSnapshot = (
@@ -74,11 +112,11 @@ export const startSnapshot = (
 
 export const storeDoc = (collectionPath: string, item: object): void => {
   const cloneItem = JSON.parse(JSON.stringify(item));
-  const current_time = new Date().getTime();
-  cloneItem.last_updated = current_time;
-  cloneItem.uid = user["uid"];
+  const currentTime = new Date().getTime();
+  cloneItem.last_updated = currentTime;
+  cloneItem.uid = user.value.uid;
   if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
-    cloneItem.doc_created_at = current_time;
+    cloneItem.doc_created_at = currentTime;
   }
   if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
     const docId = cloneItem.docId;
@@ -90,7 +128,7 @@ export const storeDoc = (collectionPath: string, item: object): void => {
     updateDoc(docRef, cloneItem);
   } else {
     if (Object.prototype.hasOwnProperty.call(data, collectionPath)) {
-      data[collectionPath][current_time] = cloneItem;
+      data[collectionPath][currentTime] = cloneItem;
     }
     addDoc(collection(db, collectionPath), cloneItem);
   }
@@ -103,26 +141,3 @@ export const stopSnapshot = (collectionPath: string): void => {
     unsubscibe[collectionPath] = null;
   }
 };
-
-interface Credentials {
-  email: string;
-  password: string;
-}
-interface FirestoreQuery {
-  field: string;
-  operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
-  value: unknown;
-}
-
-interface CollectionUnsubscribeObject {
-  [key: string]: Unsubscribe;
-}
-
-interface CollectionDataObject {
-  [key: string]: object;
-}
-
-interface UserDataObject {
-  uid: string | null;
-  email: string;
-}
