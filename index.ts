@@ -15,7 +15,7 @@ import {
   where
 } from "firebase/firestore";
 
-import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+// import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 
 const firebaseConfig = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY as string,
@@ -29,8 +29,8 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const auth = getAuth(app);
-console.log(auth);
+// const auth = getAuth(app);
+// console.log(auth);
 const db = getFirestore(app);
 
 // export const signIn = async (credentials: Credentials): Promise<object> => {
