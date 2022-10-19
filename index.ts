@@ -29,18 +29,19 @@ const firebaseConfig = {
 
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
-const auth = getAuth();
+const auth = getAuth(app);
+console.log(auth);
 const db = getFirestore(app);
 
-export const signIn = async (credentials: Credentials): Promise<object> => {
-  const user = await signInWithEmailAndPassword(
-    auth,
-    credentials.email,
-    credentials.password
-  );
-  console.log(user);
-  return user;
-};
+// export const signIn = async (credentials: Credentials): Promise<object> => {
+//   const user = await signInWithEmailAndPassword(
+//     auth,
+//     credentials.email,
+//     credentials.password
+//   );
+//   console.log(user);
+//   return user;
+// };
 
 // Simple Store Items (add matching key per firebase collection)
 export const data: CollectionDataObject = reactive({});
