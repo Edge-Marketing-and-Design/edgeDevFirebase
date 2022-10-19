@@ -1,6 +1,6 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.0.20",
+  "version": "1.0.21",
   "description": "Composables and stores for firebase",
   "main": "index.ts",
   "scripts": {
@@ -22,10 +22,10 @@
     "vite": "^3.1.8",
     "vue": "^3.2.41"
   },
-  "dependencies": {
+  "dependencies": {},
+  "peerDependencies": {
     "firebase": "^9.12.1",
     "vue": "^3.0.0",
     "vite": "^3.1.8"
-  },
-  "peerDependencies": {}
+  }
 }
