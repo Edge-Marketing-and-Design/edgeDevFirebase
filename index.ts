@@ -20,7 +20,8 @@ import {
   limit,
   Query,
   startAfter,
-  DocumentData
+  DocumentData,
+  setDoc
 } from "firebase/firestore";
 
 import {
@@ -417,8 +418,7 @@ export const storeDoc = async (
     if (Object.prototype.hasOwnProperty.call(data, collectionPath)) {
       data[collectionPath][docId] = cloneItem;
     }
-    const docRef = doc(db, collectionPath, docId);
-    updateDoc(docRef, cloneItem);
+    setDoc(doc(db, collectionPath, docId), cloneItem);
   } else {
     const docRef = await addDoc(collection(db, collectionPath), cloneItem);
     if (Object.prototype.hasOwnProperty.call(data, collectionPath)) {
