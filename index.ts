@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { reactive } from "vue";
+import { reactive, ref } from "vue";
 
 import {
   getFirestore,
@@ -19,8 +19,8 @@ import {
   orderBy,
   limit,
   Query,
-  startAt,
-  startAfter
+  startAfter,
+  DocumentData
 } from "firebase/firestore";
 
 import {
@@ -68,6 +68,11 @@ interface UserDataObject {
 interface Credentials {
   email: string;
   password: string;
+}
+
+interface StaticDataResult {
+  data: object;
+  next: DocumentData | null;
 }
 
 const firebaseConfig = {
@@ -184,30 +189,154 @@ export const getStaticData = async (
   collectionPath: string,
   queryList: FirestoreQuery[] = [],
   orderList: FirestoreOrderBy[] = [],
-  max: 0,
-  after = ""
-): Promise<{ [key: string]: unknown }> => {
-  const data: { [key: string]: unknown } = {};
-  const q = getQuery(collectionPath, queryList, orderList, max, after);
+  max = 0,
+  last: DocumentData | null = null
+): Promise<StaticDataResult> => {
+  const data: object = {};
+
+  const q = getQuery(collectionPath, queryList, orderList, max, last);
+
   const docs = await getDocs(q);
+  const nextLast: DocumentData = docs.docs[docs.docs.length - 1];
+
   docs.forEach((doc) => {
     const item = doc.data();
     item.docId = doc.id;
     data[doc.id] = item;
   });
-  return data;
+  return { data, next: nextLast };
 };
+
+export class SearchStaticData {
+  collectionPath = "";
+  queryList: FirestoreQuery[] = [];
+  orderList: FirestoreOrderBy[] = [];
+  max = 0;
+
+  data = ref({});
+  pagination = ref([]);
+  staticIsLastPage = ref<boolean>(true);
+  staticIsFirstPage = ref<boolean>(true);
+  staticCurrentPage = ref("");
+
+  prev = async (): Promise<void> => {
+    const findIndex = this.pagination.value.findIndex(
+      (x) => x.key === this.staticCurrentPage.value
+    );
+    let last = null;
+    if (findIndex === 1) {
+      this.staticCurrentPage.value = "";
+      this.staticIsLastPage.value = false;
+      this.staticIsFirstPage.value = true;
+    } else {
+      last = this.pagination.value[findIndex - 2].next;
+      this.staticCurrentPage.value = this.pagination.value[findIndex - 2].key;
+    }
+    await this.afterNextPrev(last);
+  };
+
+  next = async (): Promise<void> => {
+    const findIndex = this.pagination.value.findIndex(
+      (x) => x.key === this.staticCurrentPage.value
+    );
+    const last = this.pagination.value[findIndex].next;
+    if (this.pagination.value.length === 1) {
+      this.staticIsFirstPage.value = true;
+    } else {
+      this.staticIsFirstPage.value = false;
+    }
+    await this.afterNextPrev(last);
+  };
+
+  afterNextPrev = async (last): Promise<void> => {
+    let results = await getStaticData(
+      "users",
+      this.queryList,
+      this.orderList,
+      this.max,
+      last
+    );
+
+    if (last && Object.keys(results.data).length === 0) {
+      this.staticIsLastPage.value = true;
+      if (this.pagination.value.length === 1) {
+        last = null;
+        this.staticCurrentPage.value = "";
+        this.staticIsFirstPage.value = true;
+      } else {
+        last = this.pagination.value[this.pagination.value.length - 2].next;
+        this.staticCurrentPage.value =
+          this.pagination.value[this.pagination.value.length - 2].key;
+      }
+      results = await getStaticData(
+        "users",
+        this.queryList,
+        this.orderList,
+        this.max,
+        last
+      );
+    } else {
+      this.staticIsLastPage.value = false;
+      if (this.pagination.value.length === 1) {
+        this.staticIsFirstPage.value = false;
+      }
+    }
+    this.data.value = results.data;
+    this.staticCurrentPage.value = results.next.id;
+    if (!this.staticIsLastPage.value) {
+      if (results.next) {
+        const findItem = this.pagination.value.find(
+          (x) => x.key === results.next.id
+        );
+        if (!findItem) {
+          this.pagination.value.push({
+            key: results.next.id,
+            next: results.next
+          });
+        }
+      }
+    }
+  };
+
+  getData = async (
+    collectionPath: string,
+    queryList: FirestoreQuery[] = [],
+    orderList: FirestoreOrderBy[] = [],
+    max = 0
+  ): Promise<void> => {
+    this.collectionPath = collectionPath;
+    this.queryList = queryList;
+    this.orderList = orderList;
+    this.max = max;
+    this.staticIsLastPage.value = false;
+    this.staticIsFirstPage.value = true;
+    this.staticCurrentPage.value = "";
+    this.pagination.value = [];
+    this.pagination.value = [];
+    this.data.value = {};
+    const results = await getStaticData(
+      collectionPath,
+      queryList,
+      orderList,
+      max
+    );
+    if (Object.keys(results.data).length > 0) {
+      this.data.value = results.data;
+      this.staticCurrentPage.value = results.next.id;
+      this.pagination.value.push({ key: results.next.id, next: results.next });
+    }
+  };
+}
 
 // Composable to start snapshot listener and set unsubscribe function
 export const startSnapshot = (
   collectionPath: string,
   queryList: FirestoreQuery[] = [],
   orderList: FirestoreOrderBy[] = [],
-  max = 0,
-  after = ""
+  max = 0
 ): void => {
   data[collectionPath] = {};
-  const q = getQuery(collectionPath, queryList, orderList, max, after);
+  const q = getQuery(collectionPath, queryList, orderList, max);
   const unsubscribe = onSnapshot(q, (querySnapshot) => {
     const items = {};
     querySnapshot.forEach((doc) => {
@@ -225,7 +354,7 @@ const getQuery = (
   queryList: FirestoreQuery[] = [],
   orderList: FirestoreOrderBy[] = [],
   max = 0,
-  after = ""
+  after: DocumentData | null = null
 ): Query => {
   const queryConditions: QueryConstraint[] = queryList.map((condition) =>
     where(condition.field, condition.operator, condition.value)
