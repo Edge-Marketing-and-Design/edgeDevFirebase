@@ -60,7 +60,7 @@ interface UserDataObject {
   logInErrorMessage: string;
 }
 ```
-The reactive item **edgeFirebase.user.loggedIn** can be used in code or templates to determine if they user is logged in.
+The reactive item **edgeFirebase.user.loggedIn** can be used in code or templates to determine if the user is logged in.
 
 If there is an error logging in, **edgeFirebase.user.logInError** will be true and **edgeFirebase.user.logInErrorMessage** can be used to return that error to the user.
 
