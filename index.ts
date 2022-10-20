@@ -1,5 +1,5 @@
 import { initializeApp } from "firebase/app";
-import { reactive, ref } from "vue";
+import { reactive } from "vue";
 
 import {
   getFirestore,
@@ -207,43 +207,47 @@ export const getStaticData = async (
   return { data, next: nextLast };
 };
 
+// Class for wrapping a getSaticData to handle pagination
 export class SearchStaticData {
   collectionPath = "";
   queryList: FirestoreQuery[] = [];
   orderList: FirestoreOrderBy[] = [];
   max = 0;
 
-  data = ref({});
-  pagination = ref([]);
-  staticIsLastPage = ref<boolean>(true);
-  staticIsFirstPage = ref<boolean>(true);
-  staticCurrentPage = ref("");
+  results = reactive({
+    data: {},
+    pagination: [],
+    staticIsLastPage: true,
+    staticIsFirstPage: true,
+    staticCurrentPage: ""
+  });
 
   prev = async (): Promise<void> => {
-    const findIndex = this.pagination.value.findIndex(
-      (x) => x.key === this.staticCurrentPage.value
+    const findIndex = this.results.pagination.findIndex(
+      (x) => x.key === this.results.staticCurrentPage
     );
     let last = null;
     if (findIndex === 1) {
-      this.staticCurrentPage.value = "";
-      this.staticIsLastPage.value = false;
-      this.staticIsFirstPage.value = true;
+      this.results.staticCurrentPage = "";
+      this.results.staticIsLastPage = false;
+      this.results.staticIsFirstPage = true;
     } else {
-      last = this.pagination.value[findIndex - 2].next;
-      this.staticCurrentPage.value = this.pagination.value[findIndex - 2].key;
+      last = this.results.pagination[findIndex - 2].next;
+      this.results.staticCurrentPage =
+        this.results.pagination[findIndex - 2].key;
     }
     await this.afterNextPrev(last);
   };
 
   next = async (): Promise<void> => {
-    const findIndex = this.pagination.value.findIndex(
-      (x) => x.key === this.staticCurrentPage.value
+    const findIndex = this.results.pagination.findIndex(
+      (x) => x.key === this.results.staticCurrentPage
     );
-    const last = this.pagination.value[findIndex].next;
-    if (this.pagination.value.length === 1) {
-      this.staticIsFirstPage.value = true;
+    const last = this.results.pagination[findIndex].next;
+    if (this.results.pagination.length === 1) {
+      this.results.staticIsFirstPage = true;
     } else {
-      this.staticIsFirstPage.value = false;
+      this.results.staticIsFirstPage = false;
     }
     await this.afterNextPrev(last);
   };
@@ -258,15 +262,15 @@ export class SearchStaticData {
     );
 
     if (last && Object.keys(results.data).length === 0) {
-      this.staticIsLastPage.value = true;
-      if (this.pagination.value.length === 1) {
+      this.results.staticIsLastPage = true;
+      if (this.results.pagination.length === 1) {
         last = null;
-        this.staticCurrentPage.value = "";
-        this.staticIsFirstPage.value = true;
+        this.results.staticCurrentPage = "";
+        this.results.staticIsFirstPage = true;
       } else {
-        last = this.pagination.value[this.pagination.value.length - 2].next;
-        this.staticCurrentPage.value =
-          this.pagination.value[this.pagination.value.length - 2].key;
+        last = this.results.pagination[this.results.pagination.length - 2].next;
+        this.results.staticCurrentPage =
+          this.results.pagination[this.results.pagination.length - 2].key;
       }
       results = await getStaticData(
         "users",
@@ -276,21 +280,20 @@ export class SearchStaticData {
         last
       );
     } else {
-      this.staticIsLastPage.value = false;
-      if (this.pagination.value.length === 1) {
-        this.staticIsFirstPage.value = false;
+      this.results.staticIsLastPage = false;
+      if (this.results.pagination.length === 1) {
+        this.results.staticIsFirstPage = false;
       }
     }
-    this.data.value = results.data;
-    //TODO: if there is no data isFirstPage=true and isLastPage=true so next and prev don't show
-    this.staticCurrentPage.value = results.next.id;
-    if (!this.staticIsLastPage.value) {
+    this.results.data = results.data;
+    this.results.staticCurrentPage = results.next.id;
+    if (!this.results.staticIsLastPage) {
       if (results.next) {
-        const findItem = this.pagination.value.find(
+        const findItem = this.results.pagination.find(
           (x) => x.key === results.next.id
         );
         if (!findItem) {
-          this.pagination.value.push({
+          this.results.pagination.push({
             key: results.next.id,
             next: results.next
           });
@@ -309,12 +312,12 @@ export class SearchStaticData {
     this.queryList = queryList;
     this.orderList = orderList;
     this.max = max;
-    this.staticIsLastPage.value = false;
-    this.staticIsFirstPage.value = true;
-    this.staticCurrentPage.value = "";
-    this.pagination.value = [];
-    this.pagination.value = [];
-    this.data.value = {};
+    this.results.staticIsLastPage = true;
+    this.results.staticIsFirstPage = true;
+    this.results.staticCurrentPage = "";
+    this.results.pagination = [];
+    this.results.pagination = [];
+    this.results.data = {};
     const results = await getStaticData(
       collectionPath,
       queryList,
@@ -322,9 +325,16 @@ export class SearchStaticData {
       max
     );
     if (Object.keys(results.data).length > 0) {
-      this.data.value = results.data;
-      this.staticCurrentPage.value = results.next.id;
-      this.pagination.value.push({ key: results.next.id, next: results.next });
+      this.results.staticIsLastPage = false;
+      this.results.data = results.data;
+      this.results.staticCurrentPage = results.next.id;
+      this.results.pagination.push({
+        key: results.next.id,
+        next: results.next
+      });
+    } else {
+      this.results.staticIsLastPage = true;
+      this.results.staticIsFirstPage = true;
     }
   };
 }
