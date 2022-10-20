@@ -23,7 +23,7 @@ import * as edgeFirebase from "@edgedev/firebase";
 export { edgeFirebase };
 ```
 
-Also or Nuxt 3 SSR must be disabled, update the nuxt.config.ts file:
+Also if on Nuxt 3 - SSR must be disabled, update the nuxt.config.ts file:
 ```javascript
 export default defineNuxtConfig({ ssr: false });
 ```
