@@ -35,7 +35,6 @@ If not in Nuxt 3 or there is no need for it to be global, put this in your compo
 import * as edgeFirebase from "@edgedev/firebase";
 </script>
 ```
-<a name="Firebase Authentication>
 # Firebase Authentication
 (currently only sign in with email and password is supported)
 
