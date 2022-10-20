@@ -282,6 +282,7 @@ export class SearchStaticData {
       }
     }
     this.data.value = results.data;
+    //TODO: if there is no data isFirstPage=true and isLastPage=true so next and prev don't show
     this.staticCurrentPage.value = results.next.id;
     if (!this.staticIsLastPage.value) {
       if (results.next) {
