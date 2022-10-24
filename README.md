@@ -1,6 +1,6 @@
 # @edgedev/firebase
 
-This a collection of vue3 composables of firebase functions
+A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication and firestore.
 
 ### Table of Contents
 **[Installation](#installation)**  
