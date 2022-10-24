@@ -1,12 +1,17 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.2.0",
-  "description": "Composables and stores for firebase",
+  "version": "1.2.2",
+  "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authenication and firestore",
   "main": "index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "author": "Seth Fischer",
+  "keywords": [
+    "firebase",
+    "nuxt 3",
+    "vue 3"
+  ],
   "license": "ISC",
   "publishConfig": {
     "access": "public"
@@ -17,16 +22,13 @@
     "@typescript-eslint/parser": "^5.40.0",
     "eslint": "^8.25.0",
     "eslint-config-prettier": "^8.5.0",
+    "firebase": "^9.12.1",
     "prettier": "^2.7.1",
     "typescript": "^4.8.4",
-    "vite": "^3.1.8",
-    "vue": "^3.2.41",
-    "firebase": "^9.12.1"
+    "vue": "^3.2.41"
   },
-  "dependencies": {},
   "peerDependencies": {
     "firebase": "^9.12.1",
-    "vue": "^3.0.0",
-    "vite": "^3.1.8"
+    "vue": "^3.0.0"
   }
 }

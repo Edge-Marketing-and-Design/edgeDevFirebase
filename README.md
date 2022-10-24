@@ -16,23 +16,80 @@ pnpm install @edgedev/firebase
 ```bash
 pnpm install @edgedev/firebase
 ```
-If installing into a Nuxt 3 project, you can make this globally avaiable by adding a file (whatever.ts) to your "composables" folder with the code below. 
+### Installing with Nuxt 3 global composables
+
+Add a file (whatever.ts) to your "composables" folder with this code:
 
 ```typescript
-import * as edgeFirebase from "@edgedev/firebase";
+import { EdgeFirebase } from "@edgedev/firebase";
+const config = {
+    apiKey: "your-apiKey",
+    authDomain: "your-authDomain",
+    projectId: "your-projectId",
+    storageBucket: "your-storageBucket",
+    messagingSenderId: "your-messagingSenderId",
+    appId: "your-appId"
+  };
+const edgeFirebase = new EdgeFirebase(config);
 export { edgeFirebase };
 ```
 
-Also if on Nuxt 3 - SSR must be disabled, update the nuxt.config.ts file:
+##### *Nuxt must be configured with SSR disabled, update the nuxt.config.ts file (if other parts of your project SSR, see Nuxt 3 plugin instuctions):
 ```javascript
 export default defineNuxtConfig({ ssr: false });
 ```
 
-If not in Nuxt 3 or there is no need for it to be global, put this in your components <script setup> 
+### Installing as a plugin
+
+#### Vue 3 plugin, main.js example:
+```javascript
+import { createApp } from "vue";
+import App from "./App.vue";
+
+//edgeFirebase Plugin 
+import eFb from "@edgedev/firebase";
+app.use(eFb, {
+    apiKey: "your-apiKey",
+    authDomain: "your-authDomain",
+    projectId: "your-projectId",
+    storageBucket: "your-storageBucket",
+    messagingSenderId: "your-messagingSenderId",
+    appId: "your-appId"
+  })
+//end edgeFirebase
+
+app.mount("#app");
+```
+
+#### Nuxt 3 example using the plugins folder:
+Add a file (whatever**.client**.ts) to your "plugins" folder with the following code:
+
+***-Note the ".client" in the file name. If the file doesn't have that in the name you must disabled SSR in the nuxt config.***
+```javascript
+import eFb from "@edgedev/firebase";
+export default defineNuxtPlugin((nuxtApp) => {
+  nuxtApp.vueApp.use(eFb, {
+    apiKey: "your-apiKey",
+    authDomain: "your-authDomain",
+    projectId: "your-projectId",
+    storageBucket: "your-storageBucket",
+    messagingSenderId: "your-messagingSenderId",
+    appId: "your-appId"
+  });
+});
+```
+***-Alternatively you can disable SSR for your entire Nuxt project instead of naming the plugin with ".client", update the nuxt.config.ts file:***
 
 ```javascript
+export default defineNuxtConfig({ ssr: false });
+```
+
+
+#### After installing as a plugin you will need to include this in <script setup> in any component you want to use EdgeFirebase in:
+```javascript
 <script setup>
-import * as edgeFirebase from "@edgedev/firebase";
+import { inject } from "vue";
+const edgeFirebase = inject("edgeFirebase");
 </script>
 ```
 # Firebase Authentication
