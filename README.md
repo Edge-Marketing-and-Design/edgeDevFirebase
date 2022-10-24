@@ -62,7 +62,7 @@ app.mount("#app");
 ```
 
 #### Nuxt 3 example using the plugins folder:
-Add a file (whatever**.client**.ts) to your "plugins" folder with the following code:
+Add a file (whatever.client.ts) to your "plugins" folder with the following code:
 
 ***-Note the ".client" in the file name. If the file doesn't have that in the name you must disabled SSR in the nuxt config.***
 ```javascript
