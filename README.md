@@ -129,7 +129,7 @@ Here is a sample component using the login:
   <div>
     <div v-if="edgeFirebase.user.loggedIn">
       <button @click="edgeFirebase.logOut">Logout</button><br />
-      <AppUsers v-if="edgeFirebase.user.loggedIn" />
+      <ShowThings v-if="edgeFirebase.user.loggedIn" />
     </div>
     <div v-else>
       <input v-model="email" style="width: 400px" type="text" /><br />
@@ -164,8 +164,8 @@ Both adding and updating a document use the same function:  **edgeFirebase.store
 
 ```javascript
 <script setup>
-const addUser = {name: "bob"};
-edgeFirebase.storeDoc("users", addUser);
+const addItem = {title: "bob"};
+edgeFirebase.storeDoc("myItems", addUser);
 </script>
 ```
 Note: When a document is written to the collection several other keys are added that can be referenced:  **doc_created_at**(timestamp of doc creation), **last_updated**(timestamp document last written), **uid**(the user id of the user that updated or created the document).
@@ -175,7 +175,7 @@ If you want to query a single document from a collection use: **edgeFirebase.get
 ```javascript
 <script setup>
 const docId = "DrJRpDXVsEEqZu0UB8NT";
-const singleDoc = edgeFirebase.getDocData("users", docId);
+const singleDoc = edgeFirebase.getDocData("myItems", docId);
 </script>
 ```
 
@@ -184,7 +184,7 @@ To delete a document use: **edgeFirebase.removeDoc(collectionPath, docId)**
 ```javascript
 <script setup>
 const docId = "DrJRpDXVsEEqZu0UB8NT";
-const singleDoc = edgeFirebase.removeDoc("users", docId);
+const singleDoc = edgeFirebase.removeDoc("myItems", docId);
 </script>
 ```
 
@@ -193,15 +193,15 @@ const singleDoc = edgeFirebase.removeDoc("users", docId);
 To start a snapshot listen on a collection use: **edgeFirebase.startSnapshot(collectionPath)**
 ```javascript
 <script setup>
-edgeFirebase.startSnapshot("users");
+edgeFirebase.startSnapshot("myItems");
 </script>
 ```
 Once you have started a snapshot reactive data for that snapshot will be available with **edgeFirebase.data[collectionPath]**.  Each document in the data object is keyed with the DocumentId from FireStore.
 ```html
 <template>
   <div>
-    <div v-for="item in edgeFirebase.data.users" :key="item">
-      {{ item.name }}
+    <div v-for="item in edgeFirebase.data.myItems" :key="item">
+      {{ item.title }}
     </div>
   </div>
 </template>
@@ -224,17 +224,17 @@ interface FirestoreOrderBy {
 ##### Example with query, sort and limit:
 ```javascript
 <script setup>
-const query = [{field: "name", operator: "==", value="Bob"}];
-const sort = [{ field: "name", direction: "asc" }];
+const query = [{field: "title", operator: "==", value="Cool Thing"}];
+const sort = [{ field: "title", direction: "asc" }];
 const limit = 10;
-edgeFirebase.startSnapshot("users", query, sort, limit);
+edgeFirebase.startSnapshot("myItems", query, sort, limit);
 </setup>
 ```
 ### Stopping a snapshot listener
 To stop listening to a collection use: **edgeFirebase.stopSnapshot(collectionPath)**
 ```javascript
 <script setup>
-edgeFirebase.stopSnapshot("users");
+edgeFirebase.stopSnapshot("myItems");
 </setup>
 ```
 
@@ -242,7 +242,7 @@ edgeFirebase.stopSnapshot("users");
 To get static data from a collection use the Object: **edgeFirebase.SearchStaticData()**. Static search is done from a class to handle pagination better.
 ```javascript
 const staticSearch = new edgeFirebase.SearchStaticData();
-staticSearch.getData("users");
+staticSearch.getData("myItems");
 ```
 After initialized like above... Data will be available from **staticSearch.results.data**
 
@@ -271,7 +271,7 @@ for updating **staticSearch.results.data** the pagination data set.  There are a
 <template>
   <div>
     <div v-for="item in staticSearch.results.data" :key="item">
-      {{ item.name }}
+      {{ item.title }}
     </div>
     <div>
       <button
@@ -294,11 +294,11 @@ for updating **staticSearch.results.data** the pagination data set.  There are a
 <script setup>
 const staticSearch = new edgeFirebase.SearchStaticData();
 
-const query = [{field: "name", operator: "==", value="Bob"}];
-const sort = [{ field: "name", direction: "asc" }];
+const query = [{field: "title", operator: "==", value="Cool Thing"}];
+const sort = [{ field: "title", direction: "asc" }];
 const limit = 10;
 
-staticSearch.getData("users", query, sort, limit);
+staticSearch.getData("myItems", query, sort, limit);
 </script>
 ```
 ## License

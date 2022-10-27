@@ -31,7 +31,8 @@ import {
   Persistence,
   signInWithEmailAndPassword,
   onAuthStateChanged,
-  signOut
+  signOut,
+  createUserWithEmailAndPassword
 } from "firebase/auth";
 
 interface FirestoreQuery {
@@ -63,6 +64,27 @@ interface UserDataObject {
   loggedIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
+}
+
+interface collectionRole {
+  docId: string;
+  assign: boolean;
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+}
+
+interface userRole {
+  group: string;
+  role: collectionRole;
+}
+
+interface userRegister {
+  docId: string;
+  email: string;
+  password: string;
+  groups: userRole[] | null;
+  more: object;
 }
 
 interface Credentials {
@@ -104,25 +126,27 @@ export const EdgeFirebase = class {
 
   private firebaseConfig = null;
 
-  // Initialize Firebase
   public app = null;
   public auth = null;
   public db = null;
 
-  // Composable to logout
-  public logOut = (): void => {
-    signOut(this.auth)
-      .then(() => {
-        Object.keys(this.unsubscibe).forEach((key) => {
-          if (this.unsubscibe[key] instanceof Function) {
-            this.unsubscibe[key]();
-            this.unsubscibe[key] = null;
-          }
-        });
-      })
-      .catch(() => {
-        // Do nothing
-      });
+  public userMeta: unknown = reactive({});
+
+  private startUserMetaSync = (): void => {
+    // TODO:  create usermeta document for user if does not exist
+    // const usersRef = db.collection('users').doc('id')
+    // usersRef.get()
+    //   .then((docSnapshot) => {
+    //     if (docSnapshot.exists) {
+    //       usersRef.onSnapshot((doc) => {
+    //         // do stuff with the data
+    //       });
+    //     } else {
+    //       usersRef.set({...}) // create the document
+    //     }
+    // });
+    // TODO: START SNAPSHOTS FOR USER USERMETA
+    // LOOP THROUGH DOCUMENT KEYS AND SET REACTVIE KEYS TO VALUES
   };
 
   private setOnAuthStateChanged = (): void => {
@@ -141,6 +165,38 @@ export const EdgeFirebase = class {
         this.user.logInErrorMessage = "";
       }
     });
+  };
+
+  // TODO: NEED TO FIGURE OUT CREATE USER...
+  // EITHER ADDING A USER GOES TO A QUEUE AND ONLY THOSE IN QUEE CAN REGISTER.. PERHAPS SENDINNG INVITE EMAIL
+  // OR A WAY FOR ADMIN TO CREATE USER WITHOUT BEING LOGGED IN AS THAT USER...
+  public registerUser = (userRegister: userRegister): void => {
+    const tempApp = initializeApp(this.firebaseConfig);
+    const tempAuth = getAuth(tempApp);
+    createUserWithEmailAndPassword(
+      tempAuth,
+      userRegister.email,
+      userRegister.password
+    ).then((userCredential) => {
+      userRegister.docId = userCredential.user.uid;
+      this.storeDoc("user-meta", userRegister);
+    });
+  };
+
+  // Composable to logout
+  public logOut = (): void => {
+    signOut(this.auth)
+      .then(() => {
+        Object.keys(this.unsubscibe).forEach((key) => {
+          if (this.unsubscibe[key] instanceof Function) {
+            this.unsubscibe[key]();
+            this.unsubscibe[key] = null;
+          }
+        });
+      })
+      .catch(() => {
+        // Do nothing
+      });
   };
 
   // Composable to login and set persistence
@@ -208,6 +264,14 @@ export const EdgeFirebase = class {
     const docData = docSnap.data();
     docData.docId = docSnap.id;
     return docData;
+  };
+
+  private collectionExists = async (
+    collectionPath: string
+  ): Promise<boolean> => {
+    const q = query(collection(this.db, collectionPath), limit(1));
+    const collectionSnap = await getDocs(q);
+    return collectionSnap.size > 0;
   };
 
   private getStaticData = async (
@@ -437,6 +501,24 @@ export const EdgeFirebase = class {
     collectionPath: string,
     item: object
   ): Promise<void> => {
+    if (
+      !collectionPath.includes("/roles/") &&
+      !collectionPath.includes("user-meta")
+    ) {
+      const hasRole = await this.collectionExists(
+        collectionPath + "/roles/users"
+      );
+      if (!hasRole) {
+        const newRole: collectionRole = {
+          docId: this.user.uid,
+          assign: true,
+          read: true,
+          write: true,
+          delete: true
+        };
+        this.storeDoc(collectionPath + "/roles/users", newRole);
+      }
+    }
     const cloneItem = JSON.parse(JSON.stringify(item));
     const currentTime = new Date().getTime();
     cloneItem.last_updated = currentTime;
