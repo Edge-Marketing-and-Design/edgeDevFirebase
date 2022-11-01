@@ -1,6 +1,5 @@
 import { initializeApp } from "firebase/app";
 import { reactive } from "vue";
-
 import {
   getFirestore,
   collection,
@@ -66,25 +65,52 @@ interface UserDataObject {
   logInErrorMessage: string;
 }
 
-interface collectionRole {
-  docId: string;
+interface permissions {
   assign: boolean;
   read: boolean;
   write: boolean;
   delete: boolean;
 }
 
-interface userRole {
-  group: string;
-  role: collectionRole;
+interface collectionPermissions extends permissions {
+  docId: "admin" | "user";
+}
+
+interface role {
+  collectionPath: "-" | string; // - is root
+  role: "admin" | "user";
+}
+
+// TODO:  add to readme... roles defined in user, by collectionPath and role being admin or user
+// specialPermissions defined in user, by collectionPath and being of type permissions
+// each collection has a permissions object, with assign, read, write, delete
+// what a user can do is determined by their upper most role, and their specialPermissions.
+// for example if user has collectionPath of "orgaination" and role of "admin", they will
+// have all permissions for "organzation" all collections under "organization"
+// If a user has "assign" permission for a collection, they can add users/edit users/assign users to
+// that collection and all subcollections of that collection.
+
+interface specialPermission {
+  collectionPath: "-" | string; // - is root
+  permissions: permissions;
+}
+
+interface newUser {
+  email: string;
+  roles: role[];
+  specialPermissions: specialPermission[];
+  meta: object;
+}
+
+interface userMeta extends newUser {
+  docId: string;
+  userId: string;
 }
 
 interface userRegister {
-  docId: string;
   email: string;
   password: string;
-  groups: userRole[] | null;
-  more: object;
+  meta: object;
 }
 
 interface Credentials {
@@ -132,22 +158,22 @@ export const EdgeFirebase = class {
 
   public userMeta: unknown = reactive({});
 
-  private startUserMetaSync = (): void => {
-    // TODO:  create usermeta document for user if does not exist
-    // const usersRef = db.collection('users').doc('id')
-    // usersRef.get()
-    //   .then((docSnapshot) => {
-    //     if (docSnapshot.exists) {
-    //       usersRef.onSnapshot((doc) => {
-    //         // do stuff with the data
-    //       });
-    //     } else {
-    //       usersRef.set({...}) // create the document
-    //     }
-    // });
-    // TODO: START SNAPSHOTS FOR USER USERMETA
-    // LOOP THROUGH DOCUMENT KEYS AND SET REACTVIE KEYS TO VALUES
-  };
+  // private startUserMetaSync = (): void => {
+  // TODO:  create usermeta document for user if does not exist
+  // const usersRef = db.collection('users').doc('id')
+  // usersRef.get()
+  //   .then((docSnapshot) => {
+  //     if (docSnapshot.exists) {
+  //       usersRef.onSnapshot((doc) => {
+  //         // do stuff with the data
+  //       });
+  //     } else {
+  //       usersRef.set({...}) // create the document
+  //     }
+  // });
+  // TODO: START SNAPSHOTS FOR USER USERMETA
+  // LOOP THROUGH DOCUMENT KEYS AND SET REACTVIE KEYS TO VALUES
+  // };
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
@@ -167,25 +193,100 @@ export const EdgeFirebase = class {
     });
   };
 
-  // IMPORTANT TODO!!!! : AT USER_META LEVEL CHAGE GROUPS ROLES TO BE EITHER ADMIN OR USER...
-  // THEN!!!! CHANGE COLLECTIONROLES TO BE READ, WRITE, DELETE ETC... TO BE BASED ON USER OR ADMIN...
-  // THEN!!! TAKE OUT CODE THAT DOESN'T PUT USER_META COLEECTION ROLES IN PLACE......
-
   // TODO: NEED TO FIGURE OUT CREATE USER...
   // EITHER ADDING A USER GOES TO A QUEUE AND ONLY THOSE IN QUEE CAN REGISTER.. PERHAPS SENDINNG INVITE EMAIL
-  // OR A WAY FOR ADMIN TO CREATE USER WITHOUT BEING LOGGED IN AS THAT USER...
 
   public registerUser = (userRegister: userRegister): void => {
-    const tempApp = initializeApp(this.firebaseConfig);
-    const tempAuth = getAuth(tempApp);
     createUserWithEmailAndPassword(
-      tempAuth,
+      this.auth,
       userRegister.email,
       userRegister.password
     ).then((userCredential) => {
-      userRegister.docId = userCredential.user.uid;
-      this.storeDoc("user-meta", userRegister);
+      console.log(userCredential);
+      // TODO update user with userID = uuid;
+      // TODO UPDATE ANY NEW META DATA
     });
+    console.log(userRegister);
+  };
+
+  public addUser = (newUser: newUser): void => {
+    const userMeta: userMeta = {
+      docId: newUser.email,
+      userId: "",
+      email: newUser.email,
+      roles: newUser.roles,
+      specialPermissions: newUser.specialPermissions,
+      meta: newUser.meta
+    };
+    this.generateUserMeta(userMeta);
+  };
+
+  // TODO: NEED TO WRITE UPDATE COLLECTION PERMISSIONS FUNCTION
+  // TODO:  NEED TO WRITE UPDATE ROLES FOR USER FUNCTION
+  // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION
+
+  private generateUserMeta = (userMeta: userMeta): void => {
+    const roles: role[] = userMeta.roles;
+    const specialPermissions: specialPermission[] = userMeta.specialPermissions;
+    delete userMeta.roles;
+    delete userMeta.specialPermissions;
+    this.storeDoc("users", userMeta, false);
+    for (const role of roles) {
+      this.generatePermissions(role.collectionPath);
+      this.storeDoc(
+        "users/" + userMeta.docId + "/roles",
+        {
+          docId: role.collectionPath.replaceAll("/", "-"),
+          role: role.role
+        },
+        false
+      );
+    }
+    for (const specialPermission of specialPermissions) {
+      this.generatePermissions(specialPermission.collectionPath);
+      this.storeDoc(
+        "users/" + userMeta.docId + "/specialPermissions",
+        {
+          docId: specialPermission.collectionPath.replaceAll("/", "-"),
+          permissions: specialPermission.permissions
+        },
+        false
+      );
+    }
+  };
+
+  private generatePermissions = async (
+    collectionPath: string
+  ): Promise<void> => {
+    const hasPermissions = await this.collectionExists(
+      collectionPath + "/permissions/roles"
+    );
+    if (!hasPermissions) {
+      let newPerimission: collectionPermissions = {
+        docId: "admin",
+        assign: true,
+        read: true,
+        write: true,
+        delete: true
+      };
+      this.storeDoc(
+        collectionPath + "/permissions/roles",
+        newPerimission,
+        false
+      );
+      newPerimission = {
+        docId: "user",
+        assign: false,
+        read: false,
+        write: false,
+        delete: false
+      };
+      this.storeDoc(
+        collectionPath + "/permissions/roles",
+        newPerimission,
+        false
+      );
+    }
   };
 
   // Composable to logout
@@ -504,25 +605,12 @@ export const EdgeFirebase = class {
   // Composable to update/add a document
   public storeDoc = async (
     collectionPath: string,
-    item: object
+    item: object,
+    generatePermissions = true
   ): Promise<void> => {
-    if (
-      !collectionPath.includes("/roles/") &&
-      !collectionPath.includes("user-meta")
-    ) {
-      const hasRole = await this.collectionExists(
-        collectionPath + "/roles/users"
-      );
-      if (!hasRole) {
-        const newRole: collectionRole = {
-          docId: this.user.uid,
-          assign: true,
-          read: true,
-          write: true,
-          delete: true
-        };
-        this.storeDoc(collectionPath + "/roles/users", newRole);
-      }
+    if (generatePermissions) {
+      collectionPath = collectionPath.replaceAll("-", "_");
+      this.generatePermissions(collectionPath);
     }
     const cloneItem = JSON.parse(JSON.stringify(item));
     const currentTime = new Date().getTime();
