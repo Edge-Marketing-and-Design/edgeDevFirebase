@@ -33,7 +33,6 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
-
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -57,20 +56,14 @@ interface CollectionDataObject {
   [key: string]: object;
 }
 
-interface UserDataObject {
-  uid: string | null;
-  email: string;
-  loggedIn: boolean;
-  logInError: boolean;
-  logInErrorMessage: string;
-}
-
 interface permissions {
   assign: boolean;
   read: boolean;
   write: boolean;
   delete: boolean;
 }
+
+type action = "assign" | "read" | "write" | "delete";
 
 interface collectionPermissions extends permissions {
   docId: "admin" | "user";
@@ -85,7 +78,7 @@ interface role {
 // specialPermissions defined in user, by collectionPath and being of type permissions
 // each collection has a permissions object, with assign, read, write, delete
 // what a user can do is determined by their upper most role, and their specialPermissions.
-// for example if user has collectionPath of "orgaination" and role of "admin", they will
+// for example if user has collectionPath of "organization" and role of "admin", they will
 // have all permissions for "organzation" all collections under "organization"
 // If a user has "assign" permission for a collection, they can add users/edit users/assign users to
 // that collection and all subcollections of that collection.
@@ -93,6 +86,17 @@ interface role {
 interface specialPermission {
   collectionPath: "-" | string; // - is root
   permissions: permissions;
+}
+
+interface UserDataObject {
+  uid: string | null;
+  email: string;
+  loggedIn: boolean;
+  logInError: boolean;
+  logInErrorMessage: string;
+  meta: object;
+  roles: role[];
+  specialPermissions: specialPermission[];
 }
 
 interface newUser {
@@ -132,6 +136,16 @@ interface firebaseConfig {
   appId: string;
 }
 
+interface actionResponse {
+  success: boolean;
+  message: string;
+}
+
+interface permissionStatus {
+  canDo: boolean;
+  badCollectionPaths: string[];
+}
+
 export const EdgeFirebase = class {
   constructor(
     firebaseConfig: firebaseConfig = {
@@ -156,24 +170,53 @@ export const EdgeFirebase = class {
   public auth = null;
   public db = null;
 
-  public userMeta: unknown = reactive({});
+  private startUserMetaSync = (): void => {
+    const metaUnsubscribe = onSnapshot(
+      doc(this.db, "users", this.user.email),
+      (doc) => {
+        if (!doc.exists()) {
+          this.addUser({
+            email: this.user.email,
+            roles: [],
+            specialPermissions: [],
+            meta: {}
+          });
+          this.user.meta = {};
+        } else {
+          this.user.meta = doc.data().meta;
+        }
+      }
+    );
 
-  // private startUserMetaSync = (): void => {
-  // TODO:  create usermeta document for user if does not exist
-  // const usersRef = db.collection('users').doc('id')
-  // usersRef.get()
-  //   .then((docSnapshot) => {
-  //     if (docSnapshot.exists) {
-  //       usersRef.onSnapshot((doc) => {
-  //         // do stuff with the data
-  //       });
-  //     } else {
-  //       usersRef.set({...}) // create the document
-  //     }
-  // });
-  // TODO: START SNAPSHOTS FOR USER USERMETA
-  // LOOP THROUGH DOCUMENT KEYS AND SET REACTVIE KEYS TO VALUES
-  // };
+    let q = this.getQuery("users/" + this.user.email + "/roles");
+    const rolesUnsubscribe = onSnapshot(q, (querySnapshot) => {
+      const items = [];
+      querySnapshot.forEach((doc) => {
+        const item = doc.data();
+        item.collectionPath = doc.id;
+        delete item.docId;
+        items.push(item);
+      });
+      this.user.roles = items;
+    });
+
+    q = this.getQuery("users/" + this.user.email + "/specialPermissions");
+    const specialPermissionsUnsubscribe = onSnapshot(q, (querySnapshot) => {
+      const items = [];
+      querySnapshot.forEach((doc) => {
+        const item = doc.data();
+        item.collectionPath = doc.id;
+        delete item.docId;
+        items.push(item);
+      });
+      this.user.specialPermissions = items;
+    });
+
+    this.unsubscibe.specialPermissionsUnsubscribe =
+      specialPermissionsUnsubscribe;
+    this.unsubscibe.userRoles = rolesUnsubscribe;
+    this.unsubscibe.userMeta = metaUnsubscribe;
+  };
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
@@ -183,6 +226,7 @@ export const EdgeFirebase = class {
         this.user.loggedIn = true;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
+        this.startUserMetaSync();
       } else {
         this.user.email = "";
         this.user.uid = null;
@@ -193,8 +237,7 @@ export const EdgeFirebase = class {
     });
   };
 
-  // TODO: NEED TO FIGURE OUT CREATE USER...
-  // EITHER ADDING A USER GOES TO A QUEUE AND ONLY THOSE IN QUEE CAN REGISTER.. PERHAPS SENDINNG INVITE EMAIL
+  // TODO: all user to register only if part of users collection. If settings allow it, allow user to register without being in users collection
 
   public registerUser = (userRegister: userRegister): void => {
     createUserWithEmailAndPassword(
@@ -203,27 +246,162 @@ export const EdgeFirebase = class {
       userRegister.password
     ).then((userCredential) => {
       console.log(userCredential);
+
       // TODO update user with userID = uuid;
       // TODO UPDATE ANY NEW META DATA
     });
     console.log(userRegister);
   };
 
-  public addUser = (newUser: newUser): void => {
-    const userMeta: userMeta = {
-      docId: newUser.email,
-      userId: "",
-      email: newUser.email,
-      roles: newUser.roles,
-      specialPermissions: newUser.specialPermissions,
-      meta: newUser.meta
-    };
-    this.generateUserMeta(userMeta);
+  public addUser = async (newUser: newUser): Promise<actionResponse> => {
+    const canAssignRole = await this.multiPermissionCheck(
+      "assign",
+      newUser.roles
+    );
+    const canAssignSpecialPermissions = await this.multiPermissionCheck(
+      "assign",
+      newUser.specialPermissions
+    );
+    if (canAssignRole.canDo && canAssignSpecialPermissions.canDo) {
+      const userMeta: userMeta = {
+        docId: newUser.email,
+        userId: "",
+        email: newUser.email,
+        roles: newUser.roles,
+        specialPermissions: newUser.specialPermissions,
+        meta: newUser.meta
+      };
+      this.generateUserMeta(userMeta);
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message:
+          "Cannot assign role or special permission for collection path(s): " +
+          canAssignRole.badCollectionPaths
+            .concat(canAssignSpecialPermissions.badCollectionPaths)
+            .join(", ")
+      });
+    }
   };
 
+  private multiPermissionCheck = async (
+    action: action,
+    collections = []
+  ): Promise<permissionStatus> => {
+    let canDo = true;
+    const badCollectionPaths = [];
+    if (collections.length === 0) {
+      canDo = false;
+    }
+    for (const collection of collections) {
+      if (!(await this.permissionCheck(action, collection.collectionPath))) {
+        badCollectionPaths.push(collection.collectionPath);
+        canDo = false;
+      }
+    }
+    if (!canDo) {
+      return {
+        canDo: false,
+        badCollectionPaths
+      };
+    } else {
+      return {
+        canDo: true,
+        badCollectionPaths: []
+      };
+    }
+  };
+
+  private sendResponse = (response: actionResponse): actionResponse => {
+    console.log(response);
+    return response;
+  };
   // TODO: NEED TO WRITE UPDATE COLLECTION PERMISSIONS FUNCTION
-  // TODO:  NEED TO WRITE UPDATE ROLES FOR USER FUNCTION
+  // TODO: NEED TO WRITE UPDATE ROLES FOR USER FUNCTION
   // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION
+
+  // TODO: NEED TO IMPLEMENT permissionCheck into all functions that need it
+
+  private permissionCheck = async (
+    action: action,
+    collectionPath: string
+  ): Promise<boolean> => {
+    const collection = collectionPath.split("/");
+    let index = collection.length;
+    let permissionData = {};
+    permissionData = {
+      read: false,
+      write: false,
+      delete: false,
+      assign: false
+    };
+    while (index > 0) {
+      if (!permissionData[action]) {
+        const collectionArray = JSON.parse(JSON.stringify(collection));
+        const permissionCheck = collectionArray.splice(0, index).join("-");
+        const role = this.user.roles.find(
+          (r) => r.collectionPath === permissionCheck
+        );
+        if (role) {
+          permissionData = await this.getCollectionPermissions(
+            collectionPath,
+            role.role
+          );
+        }
+        const specialPermission = this.user.specialPermissions.find(
+          (r) => r.collectionPath === permissionCheck
+        );
+        if (specialPermission) {
+          permissionData = specialPermission.permissions;
+        }
+      }
+      index--;
+    }
+    if (!permissionData[action]) {
+      const rootRole = this.user.roles.find((r) => r.collectionPath === "-");
+      if (rootRole) {
+        permissionData = await this.getCollectionPermissions(
+          "-",
+          rootRole.role
+        );
+      }
+      const rootSpecialPermission = this.user.specialPermissions.find(
+        (r) => r.collectionPath === "-"
+      );
+      if (rootSpecialPermission) {
+        permissionData = rootSpecialPermission.permissions;
+      }
+    }
+    return permissionData[action];
+  };
+
+  private getCollectionPermissions = async (
+    collectionPath: string,
+    role: string
+  ): Promise<permissions> => {
+    const docRef = doc(this.db, collectionPath + "/permissions/roles", role);
+    const docSnap = await getDoc(docRef);
+    const permissionData = docSnap.data();
+    if (permissionData) {
+      return {
+        read: permissionData.read,
+        write: permissionData.write,
+        delete: permissionData.delete,
+        assign: permissionData.assign
+      };
+    } else {
+      return {
+        read: false,
+        write: false,
+        delete: false,
+        assign: false
+      };
+    }
+  };
 
   private generateUserMeta = (userMeta: userMeta): void => {
     const roles: role[] = userMeta.roles;
@@ -358,7 +536,10 @@ export const EdgeFirebase = class {
     email: "",
     loggedIn: false,
     logInError: false,
-    logInErrorMessage: ""
+    logInErrorMessage: "",
+    meta: {},
+    roles: [],
+    specialPermissions: []
   });
 
   public getDocData = async (
@@ -609,6 +790,7 @@ export const EdgeFirebase = class {
     generatePermissions = true
   ): Promise<void> => {
     if (generatePermissions) {
+      // TODO: Need to generatePermissions for every segment of collection if does not exist
       collectionPath = collectionPath.replaceAll("-", "_");
       this.generatePermissions(collectionPath);
     }
