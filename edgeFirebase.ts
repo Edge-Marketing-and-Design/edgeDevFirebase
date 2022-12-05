@@ -33,6 +33,7 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
+import { C, F } from "~~/dist/_nuxt/entry.6e4c92d1";
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -237,8 +238,6 @@ export const EdgeFirebase = class {
     });
   };
 
-  // TODO: all user to register only if part of users collection. If settings allow it, allow user to register without being in users collection
-
   public registerUser = (userRegister: userRegister): void => {
     createUserWithEmailAndPassword(
       this.auth,
@@ -325,6 +324,7 @@ export const EdgeFirebase = class {
   // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION
 
   // TODO: NEED TO IMPLEMENT permissionCheck into all functions that need it
+  // So far have completed:  startSnapshot, addUser, storeDoc
 
   private permissionCheck = async (
     action: action,
@@ -436,34 +436,41 @@ export const EdgeFirebase = class {
   private generatePermissions = async (
     collectionPath: string
   ): Promise<void> => {
-    const hasPermissions = await this.collectionExists(
-      collectionPath + "/permissions/roles"
-    );
-    if (!hasPermissions) {
-      let newPerimission: collectionPermissions = {
-        docId: "admin",
-        assign: true,
-        read: true,
-        write: true,
-        delete: true
-      };
-      this.storeDoc(
-        collectionPath + "/permissions/roles",
-        newPerimission,
-        false
+    const collection = collectionPath.split("/");
+    let index = collection.length;
+    while (index > 0) {
+      const collectionArray = JSON.parse(JSON.stringify(collection));
+      const permissionCheck = collectionArray.splice(0, index).join("/");
+      const hasPermissions = await this.collectionExists(
+        permissionCheck + "/permissions/roles"
       );
-      newPerimission = {
-        docId: "user",
-        assign: false,
-        read: false,
-        write: false,
-        delete: false
-      };
-      this.storeDoc(
-        collectionPath + "/permissions/roles",
-        newPerimission,
-        false
-      );
+      if (!hasPermissions) {
+        let newPerimission: collectionPermissions = {
+          docId: "admin",
+          assign: true,
+          read: true,
+          write: true,
+          delete: true
+        };
+        this.storeDoc(
+          permissionCheck + "/permissions/roles",
+          newPerimission,
+          false
+        );
+        newPerimission = {
+          docId: "user",
+          assign: false,
+          read: false,
+          write: false,
+          delete: false
+        };
+        this.storeDoc(
+          permissionCheck + "/permissions/roles",
+          newPerimission,
+          false
+        );
+      }
+      index = index - 2;
     }
   };
 
@@ -722,27 +729,6 @@ export const EdgeFirebase = class {
   // Class for wrapping a getSaticData to handle pagination
   public SearchStaticDatas = new (class {})();
 
-  // Composable to start snapshot listener and set unsubscribe function
-  public startSnapshot = (
-    collectionPath: string,
-    queryList: FirestoreQuery[] = [],
-    orderList: FirestoreOrderBy[] = [],
-    max = 0
-  ): void => {
-    this.data[collectionPath] = {};
-    const q = this.getQuery(collectionPath, queryList, orderList, max);
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = {};
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.docId = doc.id;
-        items[doc.id] = item;
-      });
-      this.data[collectionPath] = items;
-    });
-    this.unsubscibe[collectionPath] = unsubscribe;
-  };
-
   private getQuery = (
     collectionPath: string,
     queryList: FirestoreQuery[] = [],
@@ -783,39 +769,84 @@ export const EdgeFirebase = class {
     );
   };
 
+  public startSnapshot = async (
+    collectionPath: string,
+    queryList: FirestoreQuery[] = [],
+    orderList: FirestoreOrderBy[] = [],
+    max = 0
+  ): Promise<actionResponse> => {
+    const canRead = await this.permissionCheck("read", collectionPath);
+    this.data[collectionPath] = {};
+    this.unsubscibe[collectionPath] = null;
+    if (canRead) {
+      const q = this.getQuery(collectionPath, queryList, orderList, max);
+      const unsubscribe = onSnapshot(q, (querySnapshot) => {
+        const items = {};
+        querySnapshot.forEach((doc) => {
+          const item = doc.data();
+          item.docId = doc.id;
+          items[doc.id] = item;
+        });
+        this.data[collectionPath] = items;
+      });
+      this.unsubscibe[collectionPath] = unsubscribe;
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: `You do not have permission to read from "${collectionPath}"`
+      });
+    }
+  };
+
   // Composable to update/add a document
   public storeDoc = async (
     collectionPath: string,
     item: object,
     generatePermissions = true
-  ): Promise<void> => {
-    if (generatePermissions) {
-      // TODO: Need to generatePermissions for every segment of collection if does not exist
-      collectionPath = collectionPath.replaceAll("-", "_");
-      this.generatePermissions(collectionPath);
-    }
-    const cloneItem = JSON.parse(JSON.stringify(item));
-    const currentTime = new Date().getTime();
-    cloneItem.last_updated = currentTime;
-    cloneItem.uid = this.user.uid;
-    if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
-      cloneItem.doc_created_at = currentTime;
-    }
-    if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
-      const docId = cloneItem.docId;
-      if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-        this.data[collectionPath][docId] = cloneItem;
-      }
-      setDoc(doc(this.db, collectionPath, docId), cloneItem);
+  ): Promise<actionResponse> => {
+    const canWrite = await this.permissionCheck("write", collectionPath);
+    if (!canWrite) {
+      return this.sendResponse({
+        success: false,
+        message: `You do not have permission to write to "${collectionPath}"`
+      });
     } else {
-      const docRef = await addDoc(
-        collection(this.db, collectionPath),
-        cloneItem
-      );
-      if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-        this.data[collectionPath][docRef.id] = cloneItem;
+      if (generatePermissions) {
+        // TODO: Need to generatePermissions for every segment of collection if does not exist
+        collectionPath = collectionPath.replaceAll("-", "_");
+        this.generatePermissions(collectionPath);
       }
-      this.storeDoc(collectionPath, { ...cloneItem, docId: docRef.id });
+      const cloneItem = JSON.parse(JSON.stringify(item));
+      const currentTime = new Date().getTime();
+      cloneItem.last_updated = currentTime;
+      cloneItem.uid = this.user.uid;
+      if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
+        cloneItem.doc_created_at = currentTime;
+      }
+      if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
+        const docId = cloneItem.docId;
+        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+          this.data[collectionPath][docId] = cloneItem;
+        }
+        setDoc(doc(this.db, collectionPath, docId), cloneItem);
+      } else {
+        const docRef = await addDoc(
+          collection(this.db, collectionPath),
+          cloneItem
+        );
+        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+          this.data[collectionPath][docRef.id] = cloneItem;
+        }
+        this.storeDoc(collectionPath, { ...cloneItem, docId: docRef.id });
+      }
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
     }
   };
 
