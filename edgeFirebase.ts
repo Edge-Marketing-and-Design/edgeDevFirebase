@@ -33,7 +33,6 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
-import { C, F } from "~~/dist/_nuxt/entry.6e4c92d1";
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -171,7 +170,63 @@ export const EdgeFirebase = class {
   public auth = null;
   public db = null;
 
-  private startUserMetaSync = (): void => {
+  private initUserMetaRoles = async (): Promise<void> => {
+    const q = this.getQuery("users/" + this.user.email + "/roles");
+    const docs = await getDocs(q);
+    const items = [];
+    docs.forEach((doc) => {
+      const item = doc.data();
+      item.collectionPath = doc.id;
+      delete item.docId;
+      items.push(item);
+    });
+    this.user.roles = items;
+    const rolesUnsubscribe = onSnapshot(q, (querySnapshot) => {
+      const items = [];
+      querySnapshot.forEach((doc) => {
+        const item = doc.data();
+        item.collectionPath = doc.id;
+        delete item.docId;
+        items.push(item);
+      });
+      this.user.roles = items;
+    });
+    this.unsubscibe.userRoles = rolesUnsubscribe;
+  };
+
+  private initUserMetaSpecialPermissions = async (): Promise<void> => {
+    const q = this.getQuery("users/" + this.user.email + "/specialPermissions");
+    const docs = await getDocs(q);
+    const items = [];
+    docs.forEach((doc) => {
+      const item = doc.data();
+      item.collectionPath = doc.id;
+      delete item.docId;
+      items.push(item);
+    });
+    this.user.specialPermissions = items;
+    const specialPermissionsUnsubscribe = onSnapshot(q, (querySnapshot) => {
+      const items = [];
+      querySnapshot.forEach((doc) => {
+        const item = doc.data();
+        item.collectionPath = doc.id;
+        delete item.docId;
+        items.push(item);
+      });
+      this.user.specialPermissions = items;
+    });
+
+    this.unsubscibe.specialPermissionsUnsubscribe =
+      specialPermissionsUnsubscribe;
+  };
+
+  private initUserMeta = async (): Promise<void> => {
+    this.user.meta = {};
+    const docRef = doc(this.db, "users", this.user.email);
+    const docSnap = await getDoc(docRef);
+    if (docSnap) {
+      this.user.meta = docSnap.data().meta;
+    }
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
       (doc) => {
@@ -188,35 +243,14 @@ export const EdgeFirebase = class {
         }
       }
     );
-
-    let q = this.getQuery("users/" + this.user.email + "/roles");
-    const rolesUnsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = [];
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.collectionPath = doc.id;
-        delete item.docId;
-        items.push(item);
-      });
-      this.user.roles = items;
-    });
-
-    q = this.getQuery("users/" + this.user.email + "/specialPermissions");
-    const specialPermissionsUnsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = [];
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.collectionPath = doc.id;
-        delete item.docId;
-        items.push(item);
-      });
-      this.user.specialPermissions = items;
-    });
-
-    this.unsubscibe.specialPermissionsUnsubscribe =
-      specialPermissionsUnsubscribe;
-    this.unsubscibe.userRoles = rolesUnsubscribe;
     this.unsubscibe.userMeta = metaUnsubscribe;
+  };
+
+  private startUserMetaSync = async (): Promise<void> => {
+    await this.initUserMeta();
+    await this.initUserMetaSpecialPermissions();
+    await this.initUserMetaRoles();
+    this.user.loggedIn = true;
   };
 
   private setOnAuthStateChanged = (): void => {
@@ -224,9 +258,9 @@ export const EdgeFirebase = class {
       if (userAuth) {
         this.user.email = userAuth.email;
         this.user.uid = userAuth.uid;
-        this.user.loggedIn = true;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
+
         this.startUserMetaSync();
       } else {
         this.user.email = "";
@@ -323,9 +357,6 @@ export const EdgeFirebase = class {
   // TODO: NEED TO WRITE UPDATE ROLES FOR USER FUNCTION
   // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION
 
-  // TODO: NEED TO IMPLEMENT permissionCheck into all functions that need it
-  // So far have completed:  startSnapshot, addUser, storeDoc
-
   private permissionCheck = async (
     action: action,
     collectionPath: string
@@ -343,9 +374,11 @@ export const EdgeFirebase = class {
       if (!permissionData[action]) {
         const collectionArray = JSON.parse(JSON.stringify(collection));
         const permissionCheck = collectionArray.splice(0, index).join("-");
+
         const role = this.user.roles.find(
           (r) => r.collectionPath === permissionCheck
         );
+
         if (role) {
           permissionData = await this.getCollectionPermissions(
             collectionPath,
@@ -581,7 +614,6 @@ export const EdgeFirebase = class {
 
     const docs = await getDocs(q);
     const nextLast: DocumentData = docs.docs[docs.docs.length - 1];
-
     docs.forEach((doc) => {
       const item = doc.data();
       item.docId = doc.id;
@@ -593,6 +625,8 @@ export const EdgeFirebase = class {
   // Class for wrapping a getSaticData to handle pagination
   get SearchStaticData() {
     const getStaticData = this.getStaticData;
+    const permissionCheck = this.permissionCheck;
+    const sendResponse = this.sendResponse;
     return class {
       private collectionPath = "";
       private queryList: FirestoreQuery[] = [];
@@ -639,7 +673,7 @@ export const EdgeFirebase = class {
 
       private afterNextPrev = async (last): Promise<void> => {
         let results = await getStaticData(
-          "users",
+          this.collectionPath,
           this.queryList,
           this.orderList,
           this.max,
@@ -659,7 +693,7 @@ export const EdgeFirebase = class {
               this.results.pagination[this.results.pagination.length - 2].key;
           }
           results = await getStaticData(
-            "users",
+            this.collectionPath,
             this.queryList,
             this.orderList,
             this.max,
@@ -693,41 +727,50 @@ export const EdgeFirebase = class {
         queryList: FirestoreQuery[] = [],
         orderList: FirestoreOrderBy[] = [],
         max = 0
-      ): Promise<void> => {
-        this.collectionPath = collectionPath;
-        this.queryList = queryList;
-        this.orderList = orderList;
-        this.max = max;
-        this.results.staticIsLastPage = true;
-        this.results.staticIsFirstPage = true;
-        this.results.staticCurrentPage = "";
-        this.results.pagination = [];
-        this.results.pagination = [];
-        this.results.data = {};
-        const results = await getStaticData(
-          collectionPath,
-          queryList,
-          orderList,
-          max
-        );
-        if (Object.keys(results.data).length > 0) {
-          this.results.staticIsLastPage = false;
-          this.results.data = results.data;
-          this.results.staticCurrentPage = results.next.id;
-          this.results.pagination.push({
-            key: results.next.id,
-            next: results.next
-          });
-        } else {
+      ): Promise<actionResponse> => {
+        const canRead = await permissionCheck("read", collectionPath);
+
+        if (canRead) {
+          this.collectionPath = collectionPath;
+          this.queryList = queryList;
+          this.orderList = orderList;
+          this.max = max;
           this.results.staticIsLastPage = true;
           this.results.staticIsFirstPage = true;
+          this.results.staticCurrentPage = "";
+          this.results.pagination = [];
+          this.results.data = {};
+          const results = await getStaticData(
+            collectionPath,
+            queryList,
+            orderList,
+            max
+          );
+          if (Object.keys(results.data).length > 0) {
+            this.results.staticIsLastPage = false;
+            this.results.data = results.data;
+            this.results.staticCurrentPage = results.next.id;
+            this.results.pagination.push({
+              key: results.next.id,
+              next: results.next
+            });
+          } else {
+            this.results.staticIsLastPage = true;
+            this.results.staticIsFirstPage = true;
+          }
+          return sendResponse({
+            success: true,
+            message: ""
+          });
+        } else {
+          return sendResponse({
+            success: false,
+            message: `You do not have permission to read from "${collectionPath}"`
+          });
         }
       };
     };
   }
-
-  // Class for wrapping a getSaticData to handle pagination
-  public SearchStaticDatas = new (class {})();
 
   private getQuery = (
     collectionPath: string,
@@ -829,8 +872,11 @@ export const EdgeFirebase = class {
       }
       if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
         const docId = cloneItem.docId;
-        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-          this.data[collectionPath][docId] = cloneItem;
+        const canRead = await this.permissionCheck("read", collectionPath);
+        if (canRead) {
+          if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+            this.data[collectionPath][docId] = cloneItem;
+          }
         }
         setDoc(doc(this.db, collectionPath, docId), cloneItem);
       } else {
@@ -838,8 +884,11 @@ export const EdgeFirebase = class {
           collection(this.db, collectionPath),
           cloneItem
         );
-        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-          this.data[collectionPath][docRef.id] = cloneItem;
+        const canRead = await this.permissionCheck("read", collectionPath);
+        if (canRead) {
+          if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+            this.data[collectionPath][docRef.id] = cloneItem;
+          }
         }
         this.storeDoc(collectionPath, { ...cloneItem, docId: docRef.id });
       }
@@ -851,16 +900,30 @@ export const EdgeFirebase = class {
   };
 
   // Composable to delete a document
-  public removeDoc = (collectionPath: string, docId: string): void => {
-    // Just in case getting collection back from firebase is slow:
-    if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-      if (
-        Object.prototype.hasOwnProperty.call(this.data[collectionPath], docId)
-      ) {
-        delete this.data[collectionPath][docId];
+  public removeDoc = async (
+    collectionPath: string,
+    docId: string
+  ): Promise<actionResponse> => {
+    const canDelete = await this.permissionCheck("delete", collectionPath);
+    if (canDelete) {
+      if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+        if (
+          Object.prototype.hasOwnProperty.call(this.data[collectionPath], docId)
+        ) {
+          delete this.data[collectionPath][docId];
+        }
       }
+      deleteDoc(doc(this.db, collectionPath, docId));
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: `You do not have permission to delete from "${collectionPath}"`
+      });
     }
-    deleteDoc(doc(this.db, collectionPath, docId));
   };
 
   // Composable to stop snapshot listener
