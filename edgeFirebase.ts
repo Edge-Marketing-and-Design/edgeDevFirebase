@@ -33,6 +33,7 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
+
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -82,6 +83,8 @@ interface role {
 // have all permissions for "organzation" all collections under "organization"
 // If a user has "assign" permission for a collection, they can add users/edit users/assign users to
 // that collection and all subcollections of that collection.
+// NOTE: user can have write but not assign, but if they have assign, they must have write
+// DOCUMENT:  addUser, storeCollectionPermissions, storeUserMeta, storeUserRoles, storeUserSpecialPermissions
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
@@ -353,9 +356,9 @@ export const EdgeFirebase = class {
     console.log(response);
     return response;
   };
-  // TODO: NEED TO WRITE UPDATE COLLECTION PERMISSIONS FUNCTION
-  // TODO: NEED TO WRITE UPDATE ROLES FOR USER FUNCTION
-  // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION
+
+  // TODO: NEED TO WRITE UPDATE ROLES FOR USER FUNCTION - storeUserRoles
+  // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION - storeUserSpecialPermissions
 
   private permissionCheck = async (
     action: action,
@@ -374,11 +377,9 @@ export const EdgeFirebase = class {
       if (!permissionData[action]) {
         const collectionArray = JSON.parse(JSON.stringify(collection));
         const permissionCheck = collectionArray.splice(0, index).join("-");
-
         const role = this.user.roles.find(
           (r) => r.collectionPath === permissionCheck
         );
-
         if (role) {
           permissionData = await this.getCollectionPermissions(
             collectionPath,
@@ -417,6 +418,7 @@ export const EdgeFirebase = class {
     role: string
   ): Promise<permissions> => {
     const docRef = doc(this.db, collectionPath + "/permissions/roles", role);
+
     const docSnap = await getDoc(docRef);
     const permissionData = docSnap.data();
     if (permissionData) {
@@ -478,30 +480,24 @@ export const EdgeFirebase = class {
         permissionCheck + "/permissions/roles"
       );
       if (!hasPermissions) {
-        let newPerimission: collectionPermissions = {
-          docId: "admin",
+        let newPermission: permissions = {
           assign: true,
           read: true,
           write: true,
           delete: true
         };
-        this.storeDoc(
-          permissionCheck + "/permissions/roles",
-          newPerimission,
-          false
+        this.storeCollectionPermissions(
+          permissionCheck,
+          "admin",
+          newPermission
         );
-        newPerimission = {
-          docId: "user",
+        newPermission = {
           assign: false,
           read: false,
           write: false,
           delete: false
         };
-        this.storeDoc(
-          permissionCheck + "/permissions/roles",
-          newPerimission,
-          false
-        );
+        this.storeCollectionPermissions(permissionCheck, "user", newPermission);
       }
       index = index - 2;
     }
@@ -845,6 +841,39 @@ export const EdgeFirebase = class {
     }
   };
 
+  public storeCollectionPermissions = async (
+    collectionPath: string,
+    role: "admin" | "user",
+    permissions: permissions
+  ): Promise<actionResponse> => {
+    const canAssign = await this.permissionCheck("assign", collectionPath);
+    if (canAssign) {
+      const collectionPermissions: collectionPermissions = {
+        ...permissions,
+        docId: role
+      };
+      const cloneItem = JSON.parse(JSON.stringify(collectionPermissions));
+      const currentTime = new Date().getTime();
+      cloneItem.last_updated = currentTime;
+      cloneItem.uid = this.user.uid;
+      const docId = cloneItem.docId;
+      setDoc(
+        doc(this.db, collectionPath + "/permissions/roles", docId),
+        cloneItem
+      );
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message:
+          "Cannot assign permissions for collection path: " + collectionPath
+      });
+    }
+  };
+
   // Composable to update/add a document
   public storeDoc = async (
     collectionPath: string,
@@ -859,7 +888,6 @@ export const EdgeFirebase = class {
       });
     } else {
       if (generatePermissions) {
-        // TODO: Need to generatePermissions for every segment of collection if does not exist
         collectionPath = collectionPath.replaceAll("-", "_");
         this.generatePermissions(collectionPath);
       }
@@ -890,7 +918,11 @@ export const EdgeFirebase = class {
             this.data[collectionPath][docRef.id] = cloneItem;
           }
         }
-        this.storeDoc(collectionPath, { ...cloneItem, docId: docRef.id });
+        this.storeDoc(
+          collectionPath,
+          { ...cloneItem, docId: docRef.id },
+          generatePermissions
+        );
       }
       return this.sendResponse({
         success: true,
