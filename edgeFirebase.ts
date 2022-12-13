@@ -33,6 +33,7 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
+
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -434,32 +435,22 @@ export const EdgeFirebase = class {
     }
   };
 
-  private generateUserMeta = (userMeta: userMeta): void => {
+  private generateUserMeta = async (userMeta: userMeta): Promise<void> => {
     const roles: role[] = userMeta.roles;
     const specialPermissions: specialPermission[] = userMeta.specialPermissions;
     delete userMeta.roles;
     delete userMeta.specialPermissions;
     this.storeDoc("users", userMeta, false);
     for (const role of roles) {
-      this.generatePermissions(role.collectionPath);
-      this.storeDoc(
-        "users/" + userMeta.docId + "/roles",
-        {
-          docId: role.collectionPath.replaceAll("/", "-"),
-          role: role.role
-        },
-        false
-      );
+      await this.generatePermissions(role.collectionPath);
+      this.storeUserRoles(userMeta.docId, role.collectionPath, role.role);
     }
     for (const specialPermission of specialPermissions) {
-      this.generatePermissions(specialPermission.collectionPath);
-      this.storeDoc(
-        "users/" + userMeta.docId + "/specialPermissions",
-        {
-          docId: specialPermission.collectionPath.replaceAll("/", "-"),
-          permissions: specialPermission.permissions
-        },
-        false
+      await this.generatePermissions(specialPermission.collectionPath);
+      this.storeUserSpecialPermissions(
+        userMeta.docId,
+        specialPermission.collectionPath,
+        specialPermission.permissions
       );
     }
   };
@@ -482,7 +473,7 @@ export const EdgeFirebase = class {
           write: true,
           delete: true
         };
-        this.storeCollectionPermissions(
+        await this.storeCollectionPermissions(
           permissionCheck,
           "admin",
           newPermission
@@ -493,7 +484,11 @@ export const EdgeFirebase = class {
           write: false,
           delete: false
         };
-        this.storeCollectionPermissions(permissionCheck, "user", newPermission);
+        await this.storeCollectionPermissions(
+          permissionCheck,
+          "user",
+          newPermission
+        );
       }
       index = index - 2;
     }
@@ -839,6 +834,8 @@ export const EdgeFirebase = class {
 
   // TODO: need to write remove for storeUserRoles and storeUserSpecialPermissions and storeCollectionPermissions
 
+  //
+
   public storeUserSpecialPermissions = async (
     email: string,
     collectionPath: string,
@@ -846,7 +843,9 @@ export const EdgeFirebase = class {
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      const collectionExists = await this.collectionExists(collectionPath);
+      const collectionExists = await this.collectionExists(
+        collectionPath + "/permissions/roles"
+      );
       if (collectionExists) {
         const permissionItem = {
           docId: collectionPath.replaceAll("/", "-"),
@@ -889,7 +888,9 @@ export const EdgeFirebase = class {
     const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
       if (role === "admin" || role === "user") {
-        const collectionExists = await this.collectionExists(collectionPath);
+        const collectionExists = await this.collectionExists(
+          collectionPath + "/permissions/roles"
+        );
         if (collectionExists) {
           const roleItem = {
             docId: collectionPath.replaceAll("/", "-"),
