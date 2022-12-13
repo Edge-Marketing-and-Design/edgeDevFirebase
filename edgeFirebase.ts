@@ -33,7 +33,6 @@ import {
   signOut,
   createUserWithEmailAndPassword
 } from "firebase/auth";
-
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -356,9 +355,6 @@ export const EdgeFirebase = class {
     console.log(response);
     return response;
   };
-
-  // TODO: NEED TO WRITE UPDATE ROLES FOR USER FUNCTION - storeUserRoles
-  // TODO: NEED TO WRITE UPDATE SPECIAL PERMISSIONS FOR USER FUNCTION - storeUserSpecialPermissions
 
   private permissionCheck = async (
     action: action,
@@ -841,6 +837,95 @@ export const EdgeFirebase = class {
     }
   };
 
+  // TODO: need to write remove for storeUserRoles and storeUserSpecialPermissions and storeCollectionPermissions
+
+  public storeUserSpecialPermissions = async (
+    email: string,
+    collectionPath: string,
+    permissions: permissions
+  ): Promise<actionResponse> => {
+    const canAssign = await this.permissionCheck("assign", collectionPath);
+    if (canAssign) {
+      const collectionExists = await this.collectionExists(collectionPath);
+      if (collectionExists) {
+        const permissionItem = {
+          docId: collectionPath.replaceAll("/", "-"),
+          permissions,
+          last_updated: new Date().getTime(),
+          uid: this.user.uid
+        };
+        setDoc(
+          doc(
+            this.db,
+            "users/" + email + "/specialPermissions",
+            permissionItem.docId
+          ),
+          permissionItem
+        );
+        return this.sendResponse({
+          success: true,
+          message: ""
+        });
+      } else {
+        return this.sendResponse({
+          success: false,
+          message: collectionPath + " is not a valid collection path"
+        });
+      }
+    } else {
+      return this.sendResponse({
+        success: false,
+        message:
+          "Cannot assign permissions for collection path: " + collectionPath
+      });
+    }
+  };
+
+  public storeUserRoles = async (
+    email: string,
+    collectionPath: string,
+    role: "admin" | "user"
+  ): Promise<actionResponse> => {
+    const canAssign = await this.permissionCheck("assign", collectionPath);
+    if (canAssign) {
+      if (role === "admin" || role === "user") {
+        const collectionExists = await this.collectionExists(collectionPath);
+        if (collectionExists) {
+          const roleItem = {
+            docId: collectionPath.replaceAll("/", "-"),
+            role,
+            last_updated: new Date().getTime(),
+            uid: this.user.uid
+          };
+          setDoc(
+            doc(this.db, "users/" + email + "/roles", roleItem.docId),
+            roleItem
+          );
+          return this.sendResponse({
+            success: true,
+            message: ""
+          });
+        } else {
+          return this.sendResponse({
+            success: false,
+            message: collectionPath + " is not a valid collection path"
+          });
+        }
+      } else {
+        return this.sendResponse({
+          success: false,
+          message: "Role must be either 'admin' or 'user'"
+        });
+      }
+    } else {
+      return this.sendResponse({
+        success: false,
+        message:
+          "Cannot assign permissions for collection path: " + collectionPath
+      });
+    }
+  };
+
   public storeCollectionPermissions = async (
     collectionPath: string,
     role: "admin" | "user",
@@ -848,23 +933,30 @@ export const EdgeFirebase = class {
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      const collectionPermissions: collectionPermissions = {
-        ...permissions,
-        docId: role
-      };
-      const cloneItem = JSON.parse(JSON.stringify(collectionPermissions));
-      const currentTime = new Date().getTime();
-      cloneItem.last_updated = currentTime;
-      cloneItem.uid = this.user.uid;
-      const docId = cloneItem.docId;
-      setDoc(
-        doc(this.db, collectionPath + "/permissions/roles", docId),
-        cloneItem
-      );
-      return this.sendResponse({
-        success: true,
-        message: ""
-      });
+      if (role === "admin" || role === "user") {
+        const collectionPermissions: collectionPermissions = {
+          ...permissions,
+          docId: role
+        };
+        const cloneItem = JSON.parse(JSON.stringify(collectionPermissions));
+        const currentTime = new Date().getTime();
+        cloneItem.last_updated = currentTime;
+        cloneItem.uid = this.user.uid;
+        const docId = cloneItem.docId;
+        setDoc(
+          doc(this.db, collectionPath + "/permissions/roles", docId),
+          cloneItem
+        );
+        return this.sendResponse({
+          success: true,
+          message: ""
+        });
+      } else {
+        return this.sendResponse({
+          success: false,
+          message: "Role must be either 'admin' or 'user'"
+        });
+      }
     } else {
       return this.sendResponse({
         success: false,
