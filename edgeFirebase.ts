@@ -85,6 +85,7 @@ interface role {
 // NOTE: user can have write but not assign, but if they have assign, they must have write
 // DOCUMENT:  storeUser, storeCollectionPermissions, storeUserMeta, storeUserRoles, storeUserSpecialPermissions
 // removeUserRoles, removeUserSpecialPermissions
+// DOCUMENT listUsers (gets Users by Collection) and listCollectionsCanAssign
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
@@ -109,13 +110,19 @@ interface newUser {
   meta: object;
 }
 
-interface user extends newUser {
+interface user {
+  email: string;
+  role: "admin" | "user" | null;
+  specialPermission: permissions | null;
   userId: string;
   docId: string;
   uid: string;
   last_updated: Date;
 }
 
+interface usersByCollection {
+  [collectionPath: string]: [user];
+}
 interface userMeta extends newUser {
   docId: string;
   userId: string;
@@ -891,51 +898,107 @@ export const EdgeFirebase = class {
     }
   };
 
-  // BEST OPTION:   AS COLLECTIONS ARE BUILT...
-  // (LIKE WITH THE COLLECTION PERMISSION IS GERNATED... HAVE A MASTER LIST OF ALL COLLECTOIONS, THAT CAN BE USED AS A LIST TO ITTERATE THROUGH...)
-  // PERHAPS MOVING ALL COLLECTION PERMISSIONS TO THESE DOCUMENTS AS WELL...
+  public listCollectionsCanAssign = async (): Promise<string[]> => {
+    let collectionPaths = [];
+    for (const role of this.user.roles) {
+      const canAssign = await this.permissionCheck(
+        "assign",
+        role.collectionPath
+      );
+      if (canAssign) {
+        collectionPaths.push(role.collectionPath);
+      }
+    }
+    for (const specialPermission of this.user.specialPermissions) {
+      const canAssign = await this.permissionCheck(
+        "assign",
+        specialPermission.collectionPath
+      );
+      if (canAssign) {
+        collectionPaths.push(specialPermission.collectionPath);
+      }
+    }
+    collectionPaths = [...new Set(collectionPaths)];
+    let collectionPathList = [];
+    for (const collectionPath of collectionPaths) {
+      if (collectionPath === "-") {
+        const collections = await getDocs(
+          collection(this.db, "collection-data")
+        );
+        collections.forEach((doc) => {
+          collectionPathList.push(doc.id);
+        });
+      } else {
+        const collections = await getDocs(
+          query(
+            collection(this.db, "collection-data"),
+            where("collectionPath", ">=", collectionPath),
+            where("collectionPath", "<", collectionPath + "\uF8FF")
+          )
+        );
+        collections.forEach((doc) => {
+          collectionPathList.push(doc.id);
+        });
+      }
+    }
+    collectionPathList = [...new Set(collectionPathList)];
+    return collectionPathList;
+  };
 
-  // ONCE THAT IS DONE... WOULD BE ABLE TO GET LIST OF COLLECTIONS THAT "START WITH" A CERTAIN PATH...
-  // USE THOSE TO INTERATE THROUGH AND QUERY USERS BY  "roles.{COLLECTION_PATH}.collectionPath" == "{COLLECTION_PATH}")
-
-  // USE THIS FOR "LIKE QUERY":
-  // https://medium.com/feedflood/filter-by-search-keyword-in-cloud-firestore-query-638377bf0123
-
-  public listUsers = async (): Promise<void> => {
-    // TODO - CollectionPath is irterations of user roles and special permissions
-    const collectionPath = "organizations";
-    const collections = await getDocs(
-      query(
-        collection(this.db, "collection-data"),
-        where("collectionPath", ">=", collectionPath),
-        where("collectionPath", "<", collectionPath + "\uF8FF")
-      )
-    );
-    collections.forEach((doc) => {
-      console.log(doc.id);
-    });
-
-    const users = await getDocs(
-      query(
-        collection(this.db, "users"),
-        where("roles.-.collectionPath", "==", "-")
-      )
-    );
-    const userList: user[] = [];
-    users.forEach((doc) => {
-      const user = doc.data();
-      userList.push({
-        docId: user.docId,
-        email: user.email,
-        roles: user.roles,
-        specialPermissions: user.specialPermissions,
-        meta: user.meta,
-        last_updated: user.last_updated,
-        userId: user.userId,
-        uid: user.uid
+  public listUsers = async (): Promise<usersByCollection> => {
+    const userList = {};
+    const collectionPathList = await this.listCollectionsCanAssign();
+    for (const collectionPath of collectionPathList) {
+      userList[collectionPath] = [];
+      const roleUsers = await getDocs(
+        query(
+          collection(this.db, "users"),
+          where(
+            "roles." + collectionPath + ".collectionPath",
+            "==",
+            collectionPath
+          )
+        )
+      );
+      roleUsers.forEach((doc) => {
+        const user = doc.data();
+        userList[collectionPath].push({
+          docId: user.docId,
+          email: user.email,
+          role: user.roles[collectionPath].role,
+          specialPermission: null,
+          meta: user.meta,
+          last_updated: user.last_updated,
+          userId: user.userId,
+          uid: user.uid
+        });
       });
-    });
-    console.log(userList);
+      const specialPermissionsUsers = await getDocs(
+        query(
+          collection(this.db, "users"),
+          where(
+            "specialPermissions." + collectionPath + ".collectionPath",
+            "==",
+            collectionPath
+          )
+        )
+      );
+      specialPermissionsUsers.forEach((doc) => {
+        const user = doc.data();
+        userList[collectionPath].push({
+          docId: user.docId,
+          email: user.email,
+          role: null,
+          specialPermission:
+            user.specialPermissions[collectionPath].permissions,
+          meta: user.meta,
+          last_updated: user.last_updated,
+          userId: user.userId,
+          uid: user.uid
+        });
+      });
+    }
+    return userList;
   };
 
   public removeUserRoles = async (
