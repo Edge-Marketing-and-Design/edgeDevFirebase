@@ -19,7 +19,9 @@ import {
   Query,
   startAfter,
   DocumentData,
-  setDoc
+  setDoc,
+  updateDoc,
+  deleteField
 } from "firebase/firestore";
 
 import {
@@ -66,10 +68,6 @@ interface permissions {
 
 type action = "assign" | "read" | "write" | "delete";
 
-interface collectionPermissions extends permissions {
-  docId: "admin" | "user";
-}
-
 interface role {
   collectionPath: "-" | string; // - is root
   role: "admin" | "user";
@@ -85,7 +83,7 @@ interface role {
 // that collection and all subcollections of that collection.
 // NOTE: ONLY ROOT ADMIN OR USER THEMSELVES CAN SET OR UPDATE USERMETA DATA, UNLESS THE ON FIRST CREATE WHEN USER DOESN'T EXIST
 // NOTE: user can have write but not assign, but if they have assign, they must have write
-// DOCUMENT:  addUser, storeCollectionPermissions, storeUserMeta, storeUserRoles, storeUserSpecialPermissions
+// DOCUMENT:  storeUser, storeCollectionPermissions, storeUserMeta, storeUserRoles, storeUserSpecialPermissions
 // removeUserRoles, removeUserSpecialPermissions
 
 interface specialPermission {
@@ -109,6 +107,13 @@ interface newUser {
   roles: role[];
   specialPermissions: specialPermission[];
   meta: object;
+}
+
+interface user extends newUser {
+  userId: string;
+  docId: string;
+  uid: string;
+  last_updated: Date;
 }
 
 interface userMeta extends newUser {
@@ -175,62 +180,34 @@ export const EdgeFirebase = class {
   public auth = null;
   public db = null;
 
-  private initUserMetaRoles = async (): Promise<void> => {
-    const q = this.getQuery("users/" + this.user.email + "/roles");
-    const docs = await getDocs(q);
-    const items = [];
-    docs.forEach((doc) => {
-      const item = doc.data();
-      item.collectionPath = doc.id;
-      delete item.docId;
-      items.push(item);
-    });
-    this.user.roles = items;
-    const rolesUnsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = [];
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.collectionPath = doc.id;
-        delete item.docId;
-        items.push(item);
-      });
-      this.user.roles = items;
-    });
-    this.unsubscibe.userRoles = rolesUnsubscribe;
-  };
-
-  private initUserMetaSpecialPermissions = async (): Promise<void> => {
-    const q = this.getQuery("users/" + this.user.email + "/specialPermissions");
-    const docs = await getDocs(q);
-    const items = [];
-    docs.forEach((doc) => {
-      const item = doc.data();
-      item.collectionPath = doc.id;
-      delete item.docId;
-      items.push(item);
-    });
-    this.user.specialPermissions = items;
-    const specialPermissionsUnsubscribe = onSnapshot(q, (querySnapshot) => {
-      const items = [];
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.collectionPath = doc.id;
-        delete item.docId;
-        items.push(item);
-      });
-      this.user.specialPermissions = items;
-    });
-
-    this.unsubscibe.specialPermissionsUnsubscribe =
-      specialPermissionsUnsubscribe;
-  };
-
-  private initUserMeta = async (): Promise<void> => {
+  private initUserMetaPermissions = async (): Promise<void> => {
     this.user.meta = {};
     const docRef = doc(this.db, "users", this.user.email);
     const docSnap = await getDoc(docRef);
     if (docSnap) {
       this.user.meta = docSnap.data().meta;
+      const roles: role[] = [];
+      if (docSnap.data().roles) {
+        for (const collectionPath in docSnap.data().roles) {
+          roles.push({
+            collectionPath,
+            role: docSnap.data().roles[collectionPath].role
+          });
+        }
+      }
+      this.user.roles = roles;
+
+      const specialPermissions: specialPermission[] = [];
+      if (docSnap.data().specialPermissions) {
+        for (const collectionPath in docSnap.data().specialPermissions) {
+          specialPermissions.push({
+            collectionPath,
+            permissions:
+              docSnap.data().specialPermissions[collectionPath].permissions
+          });
+        }
+      }
+      this.user.specialPermissions = specialPermissions;
     }
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
@@ -245,6 +222,28 @@ export const EdgeFirebase = class {
           this.user.meta = {};
         } else {
           this.user.meta = doc.data().meta;
+          const roles: role[] = [];
+          if (doc.data().roles) {
+            for (const collectionPath in doc.data().roles) {
+              roles.push({
+                collectionPath,
+                role: doc.data().roles[collectionPath].role
+              });
+            }
+          }
+          this.user.roles = roles;
+
+          const specialPermissions: specialPermission[] = [];
+          if (doc.data().specialPermissions) {
+            for (const collectionPath in doc.data().specialPermissions) {
+              specialPermissions.push({
+                collectionPath,
+                permissions:
+                  doc.data().specialPermissions[collectionPath].permissions
+              });
+            }
+          }
+          this.user.specialPermissions = specialPermissions;
         }
       }
     );
@@ -252,9 +251,7 @@ export const EdgeFirebase = class {
   };
 
   private startUserMetaSync = async (): Promise<void> => {
-    await this.initUserMeta();
-    await this.initUserMetaSpecialPermissions();
-    await this.initUserMetaRoles();
+    await this.initUserMetaPermissions();
     this.user.loggedIn = true;
   };
 
@@ -292,41 +289,33 @@ export const EdgeFirebase = class {
 
   public removeUser = async (email: string): Promise<actionResponse> => {
     const removedFrom = [];
-    const rolesQuery = this.getQuery("users/" + email + "/roles");
-    const rolesDocs = await getDocs(rolesQuery);
-    const roles = [];
-    rolesDocs.forEach((doc) => {
-      roles.push(doc.id);
-    });
-    for (const role of roles) {
-      const canAssign = await this.permissionCheck(
-        "assign",
-        role.replaceAll("-", "/")
-      );
-      if (canAssign) {
-        this.removeUserRoles(email, role.replaceAll("-", "/"));
-        removedFrom.push(role.replaceAll("-", "/"));
+    const userRef = doc(this.db, "users", email);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.data().roles) {
+      for (const collectionPath in userSnap.data().roles) {
+        const canAssign = await this.permissionCheck(
+          "assign",
+          collectionPath.replaceAll("-", "/")
+        );
+        if (canAssign) {
+          this.removeUserRoles(email, collectionPath.replaceAll("-", "/"));
+          removedFrom.push(collectionPath.replaceAll("-", "/"));
+        }
       }
     }
-    const permissionsQuery = this.getQuery(
-      "users/" + email + "/specialPermissions"
-    );
-    const permissionsDocs = await getDocs(permissionsQuery);
-    const permissions = [];
-    permissionsDocs.forEach((doc) => {
-      permissions.push(doc.id);
-    });
-    for (const permission of permissions) {
-      const canAssign = await this.permissionCheck(
-        "assign",
-        permission.replaceAll("-", "/")
-      );
-      if (canAssign) {
-        this.removeUserSpecialPermissions(
-          email,
-          permission.replaceAll("-", "/")
+    if (userSnap.data().specialPermissions) {
+      for (const collectionPath in userSnap.data().specialPermissions) {
+        const canAssign = await this.permissionCheck(
+          "assign",
+          collectionPath.replaceAll("-", "/")
         );
-        removedFrom.push(permission.replaceAll("-", "/"));
+        if (canAssign) {
+          this.removeUserSpecialPermissions(
+            email,
+            collectionPath.replaceAll("-", "/")
+          );
+          removedFrom.push(collectionPath.replaceAll("-", "/"));
+        }
       }
     }
     if (removedFrom.length > 0) {
@@ -468,18 +457,15 @@ export const EdgeFirebase = class {
     collectionPath: string,
     role: string
   ): Promise<permissions> => {
-    const segments = collectionPath.split("/");
-    let permissionData: DocumentData = null;
-    if (segments.length % 2 === 0) {
-      const docRef = doc(this.db, collectionPath + "/permissions", role);
-      const docSnap = await getDoc(docRef);
-      permissionData = docSnap.data();
-    } else {
-      const docRef = doc(this.db, collectionPath + "/permissions/roles", role);
-      const docSnap = await getDoc(docRef);
-      permissionData = docSnap.data();
-    }
-    if (permissionData) {
+    const collectionRef = doc(
+      this.db,
+      "collection-data",
+      collectionPath.replaceAll("/", "-")
+    );
+    const collectionSnap = await getDoc(collectionRef);
+
+    if (collectionSnap.exists()) {
+      const permissionData = collectionSnap.data()[role];
       return {
         read: permissionData.read,
         write: permissionData.write,
@@ -532,28 +518,28 @@ export const EdgeFirebase = class {
       const collectionArray = JSON.parse(JSON.stringify(collection));
       const permissionCheck = collectionArray.splice(0, index).join("/");
       const hasPermissions = await this.collectionExists(permissionCheck);
+      const adminPermission: permissions = {
+        assign: true,
+        read: true,
+        write: true,
+        delete: true
+      };
+      const userPermission: permissions = {
+        assign: false,
+        read: false,
+        write: false,
+        delete: false
+      };
       if (!hasPermissions) {
-        let newPermission: permissions = {
-          assign: true,
-          read: true,
-          write: true,
-          delete: true
-        };
         await this.storeCollectionPermissions(
           permissionCheck,
           "admin",
-          newPermission
+          adminPermission
         );
-        newPermission = {
-          assign: false,
-          read: false,
-          write: false,
-          delete: false
-        };
         await this.storeCollectionPermissions(
           permissionCheck,
           "user",
-          newPermission
+          userPermission
         );
       }
       index = index - 1;
@@ -649,22 +635,16 @@ export const EdgeFirebase = class {
   private collectionExists = async (
     collectionPath: string
   ): Promise<boolean> => {
-    const segments = collectionPath.split("/");
-    if (segments.length % 2 === 0) {
-      const q = query(
-        collection(this.db, collectionPath + "/permissions"),
-        limit(1)
-      );
-      const collectionSnap = await getDocs(q);
-      return collectionSnap.size > 0;
-    } else {
-      const q = query(
-        collection(this.db, collectionPath + "/permissions/roles"),
-        limit(1)
-      );
-      const collectionSnap = await getDocs(q);
-      return collectionSnap.size > 0;
+    const collectionRef = doc(
+      this.db,
+      "collection-data",
+      collectionPath.replaceAll("/", "-")
+    );
+    const collectionSnap = await getDoc(collectionRef);
+    if (collectionSnap.exists()) {
+      return true;
     }
+    return false;
   };
 
   private getStaticData = async (
@@ -911,19 +891,62 @@ export const EdgeFirebase = class {
     }
   };
 
+  // BEST OPTION:   AS COLLECTIONS ARE BUILT...
+  // (LIKE WITH THE COLLECTION PERMISSION IS GERNATED... HAVE A MASTER LIST OF ALL COLLECTOIONS, THAT CAN BE USED AS A LIST TO ITTERATE THROUGH...)
+  // PERHAPS MOVING ALL COLLECTION PERMISSIONS TO THESE DOCUMENTS AS WELL...
+
+  // ONCE THAT IS DONE... WOULD BE ABLE TO GET LIST OF COLLECTIONS THAT "START WITH" A CERTAIN PATH...
+  // USE THOSE TO INTERATE THROUGH AND QUERY USERS BY  "roles.{COLLECTION_PATH}.collectionPath" == "{COLLECTION_PATH}")
+
+  // USE THIS FOR "LIKE QUERY":
+  // https://medium.com/feedflood/filter-by-search-keyword-in-cloud-firestore-query-638377bf0123
+
+  public listUsers = async (): Promise<void> => {
+    // TODO - CollectionPath is irterations of user roles and special permissions
+    const collectionPath = "organizations";
+    const collections = await getDocs(
+      query(
+        collection(this.db, "collection-data"),
+        where("collectionPath", ">=", collectionPath),
+        where("collectionPath", "<", collectionPath + "\uF8FF")
+      )
+    );
+    collections.forEach((doc) => {
+      console.log(doc.id);
+    });
+
+    const users = await getDocs(
+      query(
+        collection(this.db, "users"),
+        where("roles.-.collectionPath", "==", "-")
+      )
+    );
+    const userList: user[] = [];
+    users.forEach((doc) => {
+      const user = doc.data();
+      userList.push({
+        docId: user.docId,
+        email: user.email,
+        roles: user.roles,
+        specialPermissions: user.specialPermissions,
+        meta: user.meta,
+        last_updated: user.last_updated,
+        userId: user.userId,
+        uid: user.uid
+      });
+    });
+    console.log(userList);
+  };
+
   public removeUserRoles = async (
     email: string,
     collectionPath: string
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      deleteDoc(
-        doc(
-          this.db,
-          "users/" + email + "/roles",
-          collectionPath.replaceAll("/", "-")
-        )
-      );
+      await updateDoc(doc(this.db, "users/" + email), {
+        ["roles." + collectionPath.replaceAll("/", "-")]: deleteField()
+      });
       return this.sendResponse({
         success: true,
         message: ""
@@ -943,13 +966,10 @@ export const EdgeFirebase = class {
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      deleteDoc(
-        doc(
-          this.db,
-          "users/" + email + "/specialPermissions",
-          collectionPath.replaceAll("/", "-")
-        )
-      );
+      await updateDoc(doc(this.db, "users/" + email), {
+        ["specialPermissions." + collectionPath.replaceAll("/", "-")]:
+          deleteField()
+      });
       return this.sendResponse({
         success: true,
         message: ""
@@ -973,19 +993,12 @@ export const EdgeFirebase = class {
       const collectionExists = await this.collectionExists(collectionPath);
       if (collectionExists) {
         const permissionItem = {
-          docId: collectionPath.replaceAll("/", "-"),
-          permissions,
-          last_updated: new Date().getTime(),
-          uid: this.user.uid
+          ["specialPermissions." + collectionPath.replaceAll("/", "-")]: {
+            collectionPath: collectionPath.replaceAll("/", "-"),
+            permissions
+          }
         };
-        setDoc(
-          doc(
-            this.db,
-            "users/" + email + "/specialPermissions",
-            permissionItem.docId
-          ),
-          permissionItem
-        );
+        updateDoc(doc(this.db, "users/" + email), permissionItem);
         return this.sendResponse({
           success: true,
           message: ""
@@ -1017,15 +1030,13 @@ export const EdgeFirebase = class {
         const collectionExists = await this.collectionExists(collectionPath);
         if (collectionExists) {
           const roleItem = {
-            docId: collectionPath.replaceAll("/", "-"),
-            role,
-            last_updated: new Date().getTime(),
-            uid: this.user.uid
+            ["roles." + collectionPath.replaceAll("/", "-")]: {
+              collectionPath: collectionPath.replaceAll("/", "-"),
+              role
+            }
           };
-          setDoc(
-            doc(this.db, "users/" + email + "/roles", roleItem.docId),
-            roleItem
-          );
+
+          updateDoc(doc(this.db, "users/" + email), roleItem);
           return this.sendResponse({
             success: true,
             message: ""
@@ -1060,29 +1071,29 @@ export const EdgeFirebase = class {
 
     if (canAssign) {
       if (role === "admin" || role === "user") {
-        const segments = collectionPath.split("/");
-
         const currentTime = new Date().getTime();
-        const collectionPermissions: collectionPermissions = {
-          ...permissions,
-          docId: role
-        };
-        const cloneItem = JSON.parse(JSON.stringify(collectionPermissions));
-        cloneItem.last_updated = currentTime;
-        cloneItem.uid = this.user.uid;
-        const docId = cloneItem.docId;
 
-        if (segments.length % 2 === 0) {
-          setDoc(
-            doc(this.db, collectionPath + "/permissions", docId),
-            cloneItem
-          );
-        } else {
-          setDoc(
-            doc(this.db, collectionPath + "/permissions/roles", docId),
-            cloneItem
+        const collectionItem = {
+          collectionPath: collectionPath.replaceAll("/", "-"),
+          docId: collectionPath.replaceAll("/", "-")
+        };
+        const collectionRef = doc(
+          this.db,
+          "collection-data",
+          collectionItem.collectionPath
+        );
+        const collectionSnap = await getDoc(collectionRef);
+        if (!collectionSnap.exists()) {
+          await setDoc(
+            doc(this.db, "collection-data", collectionItem.collectionPath),
+            collectionItem
           );
         }
+        await updateDoc(
+          doc(this.db, "collection-data/" + collectionItem.collectionPath),
+          { [role]: permissions, uid: this.user.uid, last_updated: currentTime }
+        );
+
         return this.sendResponse({
           success: true,
           message: ""
