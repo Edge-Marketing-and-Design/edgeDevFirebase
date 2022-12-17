@@ -4,6 +4,7 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 
 ### Table of Contents
 **[Installation](#installation)**  
+**[User Management and Collection Permissions](#user-management-and-collection-permissions)**
 **[Firebase Authentication](#firebase-authentication)**  
 **[Firestore Basic Document Interactions](#firestore-Basic-document-interactions)**  
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
@@ -85,14 +86,113 @@ export default defineNuxtConfig({ ssr: false });
 ```
 
 
-#### After installing as a plugin you will need to include this in <script setup> in any component you want to use EdgeFirebase in:
+#### After installing as a plugin you will need to include this in "script setup" in any component you want to use EdgeFirebase in:
 ```javascript
 <script setup>
 import { inject } from "vue";
 const edgeFirebase = inject("edgeFirebase");
 </script>
 ```
+
+# User Management and Collection Permissions
+
+#### Adding a User
+
+Users must be added before they can register with a login and password.  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below.
+
+How to add a user:
+
+```javascript
+edgeFirebase.setUser({
+    email: "user@edgemarketingdesign.com",
+    roles: [
+      {
+        collectionPath: "myItems/subitems/things",
+        role: "user"
+      }
+    ],
+    specialPermissions: [
+      {
+        collectionPath: "otherthings",
+        permissions: { assign: false, write: true, read: true, delete: false}
+      }
+    ],
+    meta: { firstName: "John", lastName: "Doe", age: 28 }
+});
+```
+
+
+
+#### Explanation of permissions
+
+- **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change user permissions for that collection.  When a user has assign they must also have write permissions for that same collection.
+- **write: boolean** - Allows a user to write documents to collection
+- **read: boolean** - Allows a user to read documents in a collection
+- **delete: boolean** - Allows a user to delete documents in a collection 
+
+#### Collection permissions by role
+
+Each collection (including sub collections) will automatically be assigned permissions keyed by role.  By default each collection and sub collection will receive the following permissions by role when created:
+
+- **admin:** assign: true, write: true, read: true, delete: true
+- **user:** assign: false, write:false, read: false, delete: false
+
+How to change role permissions for a specific collection:
+
+```javascript
+edgeFirebase.storeCollectionPermissions(
+    "myItems/subitems/things",  // Collection path
+    "user", // must be user or admin
+    {
+      assign: false,
+      write: false,
+      read: true,
+      delete: false
+    }
+ );
+```
+
+#### User roles for collections
+
+Users are assigned roles based on collection paths.  A role assigned by a collection path that has sub collections will also determine what the user can do on all sub collections or a user can be assigned a role specifically for a sub collection only.  For example if a user is assigned as admin for "myItems/subitems/things" they will only have acces to that collection. But if the user is assigned as an admin for "myItems" they will have the admin permissions for "myItems" and all sub collections of "myItems".
+
+How to assign a user a role for a collection:
+
+```javascript
+  edgeFirebase.storeUserRoles(
+    "user@edgemarketingdesign.com",
+    "myItems/subitems/things",
+    "admin"
+  );
+```
+
+How to remove a role from a user for a collection:
+
+```javascript
+  edgeFirebase.removeUserRoles(
+    "user@edgemarketingdesign.com",
+    "myItems/subitems/things"
+  );
+```
+
+
+
+NOTE:  Explain the root "-" permissions.
+
+NOTE: ONLY ROOT ADMIN OR USER THEMSELVES CAN SET OR UPDATE USERMETA DATA, UNLESS THE ON FIRST CREATE WHEN USER DOESN'T EXIST
+
+DOCUMENT:   storeUserSpecialPermissions
+
+removeUserSpecialPermissions, removeUser
+
+DOCUMENT listUsers (gets Users by Collection) and listCollectionsCanAssign
+
+DOCUMENT registerUser
+
+DOCUMENT -- ALSO DOCUMENT HOW ALL FUNCTIONS CAN AWAIT AND GET PERMISSION ERROR REPSONSES.
+
 # Firebase Authentication
+
 (currently only sign in with email and password is supported)
 
 If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
@@ -164,8 +264,8 @@ Both adding and updating a document use the same function:  **edgeFirebase.store
 
 ```javascript
 <script setup>
-const addItem = {title: "bob"};
-edgeFirebase.storeDoc("myItems", addUser);
+const addItem = {title: "Cool Thing"};
+edgeFirebase.storeDoc("myItems", addItem);
 </script>
 ```
 Note: When a document is written to the collection several other keys are added that can be referenced:  **doc_created_at**(timestamp of doc creation), **last_updated**(timestamp document last written), **uid**(the user id of the user that updated or created the document).
