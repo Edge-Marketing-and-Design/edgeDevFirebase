@@ -83,9 +83,12 @@ interface role {
 // that collection and all subcollections of that collection.
 // NOTE: ONLY ROOT ADMIN OR USER THEMSELVES CAN SET OR UPDATE USERMETA DATA, UNLESS THE ON FIRST CREATE WHEN USER DOESN'T EXIST
 // NOTE: user can have write but not assign, but if they have assign, they must have write
-// DOCUMENT:  storeUser, storeCollectionPermissions, storeUserMeta, storeUserRoles, storeUserSpecialPermissions
-// removeUserRoles, removeUserSpecialPermissions
+// DOCUMENT:  storeUser, storeCollectionPermissions, storeUserRoles, storeUserSpecialPermissions
+// removeUserRoles, removeUserSpecialPermissions, removeUser
 // DOCUMENT listUsers (gets Users by Collection) and listCollectionsCanAssign
+// DOCUMENT registerUser
+
+// TODO: PASSWORD RESET FUNCTION AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
@@ -188,6 +191,9 @@ export const EdgeFirebase = class {
   public db = null;
 
   private initUserMetaPermissions = async (): Promise<void> => {
+    updateDoc(doc(this.db, "users", this.user.email), {
+      userId: this.user.uid
+    });
     this.user.meta = {};
     const docRef = doc(this.db, "users", this.user.email);
     const docSnap = await getDoc(docRef);
@@ -281,17 +287,43 @@ export const EdgeFirebase = class {
     });
   };
 
-  public registerUser = (userRegister: userRegister): void => {
-    createUserWithEmailAndPassword(
-      this.auth,
-      userRegister.email,
-      userRegister.password
-    ).then((userCredential) => {
-      console.log(userCredential);
-      // TODO update user with userID = uuid;
-      // TODO UPDATE ANY NEW META DATA
-    });
-    console.log(userRegister);
+  public registerUser = async (
+    userRegister: userRegister
+  ): Promise<actionResponse> => {
+    const userRef = doc(this.db, "users", userRegister.email);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      const user = userSnap.data();
+      if (user.userId) {
+        return this.sendResponse({
+          success: false,
+          message: "User already registered"
+        });
+      } else {
+        createUserWithEmailAndPassword(
+          this.auth,
+          userRegister.email,
+          userRegister.password
+        ).then(() => {
+          const metaUpdate = {};
+          for (const [key, value] of Object.entries(userRegister.meta)) {
+            metaUpdate["meta." + key] = value;
+          }
+          if (Object.keys(metaUpdate).length > 0) {
+            updateDoc(doc(this.db, "users", this.user.email), metaUpdate);
+          }
+          return this.sendResponse({
+            success: true,
+            message: ""
+          });
+        });
+      }
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: "User doesn't exist"
+      });
+    }
   };
 
   public removeUser = async (email: string): Promise<actionResponse> => {
