@@ -132,7 +132,7 @@ edgeFirebase.setUser({
 
 #### Collection permissions by role
 
-Each collection (including sub collections) will automatically be assigned permissions keyed by role.  By default each collection and sub collection will receive the following permissions by role when created:
+Each collection (including sub collections) will automatically have permissions keyed by role.  By default each collection and sub collection will receive the following permissions by role when created:
 
 - **admin:** assign: true, write: true, read: true, delete: true
 - **user:** assign: false, write:false, read: false, delete: false
@@ -154,7 +154,7 @@ edgeFirebase.storeCollectionPermissions(
 
 #### User roles for collections
 
-Users are assigned roles based on collection paths.  A role assigned by a collection path that has sub collections will also determine what the user can do on all sub collections or a user can be assigned a role specifically for a sub collection only.  For example if a user is assigned as admin for "myItems/subitems/things" they will only have acces to that collection. But if the user is assigned as an admin for "myItems" they will have the admin permissions for "myItems" and all sub collections of "myItems".
+Users are assigned roles based on collection paths.  A role assigned by a collection path that has sub collections will also determine what the user can do on all sub collections or a user can be assigned a role specifically for a sub collection only.  For example if a user is assigned as admin for "myItems/subitems/things" they will only have admin acces to that collection. But if the user is assigned as an admin for "myItems" they will have the admin permissions for "myItems" and all sub collections of "myItems".
 
 How to assign a user a role for a collection:
 
@@ -215,6 +215,27 @@ interface UserDataObject {
   loggedIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
+  meta: object;
+  roles: role[]; //see role below
+  specialPermissions: specialPermission[]; //see specialPermission bleow
+}
+
+// sub types of UserDataObject:
+interface role {
+  collectionPath: "-" | string; // - is root
+  role: "admin" | "user";
+}
+
+interface specialPermission {
+  collectionPath: "-" | string; // - is root
+  permissions: permissions; // see permissions below
+}
+
+interface permissions {
+  assign: boolean;
+  read: boolean;
+  write: boolean;
+  delete: boolean;
 }
 ```
 The reactive item **edgeFirebase.user.loggedIn** can be used in code or templates to determine if the user is logged in.
