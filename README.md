@@ -98,7 +98,7 @@ const edgeFirebase = inject("edgeFirebase");
 
 #### Adding a User
 
-Users must be added before they can register with a login and password.  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below.
+Users must be added before they can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below.
 
 How to add a user:
 
@@ -177,7 +177,7 @@ How to remove a role from a user for a collection:
 
 #### Root permissions and first user
 
-You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this use to add other "root users" or setup other collections and assign roles to them.
+You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.
 
 | ![root-collection-roles](./images/root-collection-roles.png) | ![root-user](./images/root-user.jpg) |
 | ------------------------------------------------------------ | ------------------------------------ |
