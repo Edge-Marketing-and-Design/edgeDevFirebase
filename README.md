@@ -4,7 +4,7 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 
 ### Table of Contents
 **[Installation](#installation)**  
-**[User Management and Collection Permissions](#user-management-and-collection-permissions)**
+**[User Management and Collection Permissions](#user-management-and-collection-permissions)**  
 **[Firebase Authentication](#firebase-authentication)**  
 **[Firestore Basic Document Interactions](#firestore-Basic-document-interactions)**  
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
