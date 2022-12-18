@@ -125,7 +125,7 @@ edgeFirebase.setUser({
 
 #### Explanation of permissions
 
-- **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change user permissions for that collection.  When a user has assign they must also have write permissions for that same collection.
+- **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change permissions for that collection.  When a user has assign they must also have write permissions for that same collection.
 - **write: boolean** - Allows a user to write documents to collection
 - **read: boolean** - Allows a user to read documents in a collection
 - **delete: boolean** - Allows a user to delete documents in a collection 
@@ -175,11 +175,14 @@ How to remove a role from a user for a collection:
   );
 ```
 
+#### Root permissions and first user
+
+You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this use to add other "root users" or setup other collections and assign roles to them.
+
+| ![root-collection-roles](./images/root-collection-roles.png) | ![root-user](./images/root-user.jpg) |
+| ------------------------------------------------------------ | ------------------------------------ |
 
 
-NOTE:  Explain the root "-" permissions.
-
-NOTE: ONLY ROOT ADMIN OR USER THEMSELVES CAN SET OR UPDATE USERMETA DATA, UNLESS THE ON FIRST CREATE WHEN USER DOESN'T EXIST
 
 DOCUMENT:   storeUserSpecialPermissions
 
