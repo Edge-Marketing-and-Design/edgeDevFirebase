@@ -364,7 +364,7 @@ const login = () => {
 };
 </script>
 ```
-Change password:
+### Change password:
 
 This function allows a user to change their current password while logged in:
 
