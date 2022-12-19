@@ -33,7 +33,10 @@ import {
   signInWithEmailAndPassword,
   onAuthStateChanged,
   signOut,
-  createUserWithEmailAndPassword
+  createUserWithEmailAndPassword,
+  updatePassword,
+  reauthenticateWithCredential,
+  EmailAuthProvider
 } from "firebase/auth";
 
 interface FirestoreQuery {
@@ -73,7 +76,7 @@ interface role {
   role: "admin" | "user";
 }
 
-// TODO: PASSWORD RESET FUNCTION <-- NOT LOGGED IN,  PASSWORD UPDATE FUNTION <-- WHEN LOGGED IN,  AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
+// TODO: PASSWORD RESET FUNCTION <-- NOT LOGGED IN,  AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
@@ -307,6 +310,30 @@ export const EdgeFirebase = class {
       return this.sendResponse({
         success: false,
         message: "User doesn't exist"
+      });
+    }
+  };
+
+  public setPassword = async (
+    oldpassword: string,
+    password: string
+  ): Promise<actionResponse> => {
+    const user = this.auth.currentUser;
+    const credential = EmailAuthProvider.credential(
+      this.user.email,
+      oldpassword
+    );
+    try {
+      await reauthenticateWithCredential(user, credential);
+      await updatePassword(user, password);
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: error.message
       });
     }
   };

@@ -364,7 +364,16 @@ const login = () => {
 };
 </script>
 ```
+Change password:
+
+This function allows a user to change their current password while logged in:
+
+```javascript
+edgeFirebase.setPassword("old-password", "new-password");
+```
+
 # Firestore Basic Document Interactions
+
 ### Adding/Update a Document.
 Both adding and updating a document use the same function:  **edgeFirebase.storeDoc(collectionPath, object)** for a document to be updated the object must contain the key **docId** and the value must match the ID of a document in the collection being updated *(Note: All documents returned by edgeFirebase functions will already have docId insert in the document objects)*. If the object does not contain docId or the docId doesn't match a document in the collection, new document will be created.
 
