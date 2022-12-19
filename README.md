@@ -8,7 +8,8 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 **[Firebase Authentication](#firebase-authentication)**  
 **[Firestore Basic Document Interactions](#firestore-Basic-document-interactions)**  
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
-**[Firestore Static Collection Data](#firestore-static-collection-data)** 
+**[Firestore Static Collection Data](#firestore-static-collection-data)**   
+**[Await and response](#await-and-responses)**
 
 # Installation
 
@@ -96,7 +97,7 @@ const edgeFirebase = inject("edgeFirebase");
 
 # User Management and Collection Permissions
 
-#### Adding a User
+### Adding a User
 
 Users must be added before they can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below.
 
@@ -117,20 +118,37 @@ edgeFirebase.setUser({
         permissions: { assign: false, write: true, read: true, delete: false}
       }
     ],
-    meta: { firstName: "John", lastName: "Doe", age: 28 }
+    meta: { firstName: "John", lastName: "Doe", age: 28 } // This is just an example of meta, it can contain any fields and any number of fields.
 });
 ```
 
 
 
-#### Explanation of permissions
+### Register User
 
-- **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change permissions for that collection.  When a user has assign they must also have write permissions for that same collection.
+After someoene has been added as a user they will need to "self register" to begin using the system.  Only users that have been added already by someone with assign permissions can register.  The function also checks to make sure they aren't already registered.
+
+```javascript
+  edgeFirebase.registerUser({
+    email: "user@edgemarketingdesign.com",
+    password: "Password1234",
+    meta: {
+      firstName: "John",
+      lastName: "Doe"
+    } // This is just an example of meta, it can contain any fields and any number of fields.
+  });
+```
+
+
+
+### Explanation of permissions
+
+- **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change permissions for that collection. For a user to be able run setUser, storeCollectionPermisions, storeUserRoles, removeUserRoles, storeUserSpecialPermissions, or removeUserSpecialPermissions, they must have assign access to any of the collection paths passed into those functions.
 - **write: boolean** - Allows a user to write documents to collection
 - **read: boolean** - Allows a user to read documents in a collection
 - **delete: boolean** - Allows a user to delete documents in a collection 
 
-#### Collection permissions by role
+### Collection permissions by role
 
 Each collection (including sub collections) will automatically have permissions keyed by role.  By default each collection and sub collection will receive the following permissions by role when created:
 
@@ -152,7 +170,7 @@ edgeFirebase.storeCollectionPermissions(
  );
 ```
 
-#### User roles for collections
+### User roles for collections
 
 Users are assigned roles based on collection paths.  A role assigned by a collection path that has sub collections will also determine what the user can do on all sub collections or a user can be assigned a role specifically for a sub collection only.  For example if a user is assigned as admin for "myItems/subitems/things" they will only have admin acces to that collection. But if the user is assigned as an admin for "myItems" they will have the admin permissions for "myItems" and all sub collections of "myItems".
 
@@ -166,7 +184,7 @@ How to assign a user a role for a collection:
   );
 ```
 
-How to remove a role from a user for a collection:
+Remove a role from a user for a collection:
 
 ```javascript
   edgeFirebase.removeUserRoles(
@@ -175,24 +193,88 @@ How to remove a role from a user for a collection:
   );
 ```
 
-#### Root permissions and first user
+### Root permissions and first user
 
-You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.
+You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like a super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.
 
 | ![root-collection-roles](./images/root-collection-roles.png) | ![root-user](./images/root-user.jpg) |
 | ------------------------------------------------------------ | ------------------------------------ |
 
 
 
-DOCUMENT:   storeUserSpecialPermissions
+### User special permissions
 
-removeUserSpecialPermissions, removeUser
+If you want to give a user a unique set of permissions for a collection that doesn't match the admin or user roles for that collection you can set "special permissions".
 
-DOCUMENT listUsers (gets Users by Collection) and listCollectionsCanAssign
+```javascript
+  edgeFirebase.storeUserSpecialPermissions(
+    "user@edgemarketingdesign.com",
+    "myItems/subitems/things",
+    {
+      assign: false,
+      write: true,
+      read: true,
+      delete: true
+    }
+  );
+```
 
-DOCUMENT registerUser
+Remove user special permissions:
 
-DOCUMENT -- ALSO DOCUMENT HOW ALL FUNCTIONS CAN AWAIT AND GET PERMISSION ERROR REPSONSES.
+```javascript
+  edgeFirebase.removeUserSpecialPermissions(
+    "user@edgemarketingdesign.com",
+    "myItems/subitems/things"
+  );
+```
+
+
+
+### Remove user
+
+The remove user function doesn't actually delete the user completely from the system but instead removes all roles and special permissions that the user running the function has assign access for.  In this way the user is "removed" as far as the "assigning user" is concerned but the user will remain a user for collections that the "assign user" doesn't have access to.  
+
+```javascript
+edgeFirebase.removeUser("user@edgemarketingdesign.com");
+```
+
+
+
+### List Users
+
+This will list all users that are members of collections that the user running the function has assign access for, it will list them grouped by collections.
+
+```javascript
+const users = await edgeFirebase.listUsers();
+```
+
+```typescript
+interface usersByCollection {
+  [collectionPath: string]: [user];
+}
+```
+
+```typescript
+interface user {
+  email: string;
+  role: "admin" | "user" | null;
+  specialPermission: permissions | null;
+  userId: string;
+  docId: string;
+  uid: string;
+  last_updated: Date;
+}
+```
+
+
+
+### List Collections with Assign Access
+
+This function will list all collections that the user running it has assign access for. 
+
+```javascript
+const collections = await edgeFirebase.listCollectionsCanAssign();  // returns array of strings (collection paths)
+```
 
 # Firebase Authentication
 
@@ -425,5 +507,27 @@ const limit = 10;
 staticSearch.getData("myItems", query, sort, limit);
 </script>
 ```
+
+
+# Await and responses
+
+All functions can be used in conjunction with "await" and will return a response that can be used.  
+
+```javascript
+const response = await edgeFirebase.startSnapshot("things");
+```
+
+reponse:
+
+```typescript
+interface actionResponse {
+  success: boolean;
+  message: string;
+}
+```
+
+
+
 ## License
+
 [ISC](https://choosealicense.com/licenses/isc/)

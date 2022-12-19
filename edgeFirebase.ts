@@ -73,22 +73,7 @@ interface role {
   role: "admin" | "user";
 }
 
-// TODO:  add to readme... roles defined in user, by collectionPath and role being admin or user
-// specialPermissions defined in user, by collectionPath and being of type permissions
-// each collection has a permissions object, with assign, read, write, delete
-// what a user can do is determined by their upper most role, and their specialPermissions.
-// for example if user has collectionPath of "organization" and role of "admin", they will
-// have all permissions for "organzation" all collections under "organization"
-// If a user has "assign" permission for a collection, they can add users/edit users/assign users to
-// that collection and all subcollections of that collection.
-// NOTE: ONLY ROOT ADMIN OR USER THEMSELVES CAN SET OR UPDATE USERMETA DATA, UNLESS THE ON FIRST CREATE WHEN USER DOESN'T EXIST
-// NOTE: user can have write but not assign, but if they have assign, they must have write
-// DOCUMENT:  storeUser, storeCollectionPermissions, storeUserRoles, storeUserSpecialPermissions
-// removeUserRoles, removeUserSpecialPermissions, removeUser
-// DOCUMENT listUsers (gets Users by Collection) and listCollectionsCanAssign
-// DOCUMENT registerUser
-
-// TODO: PASSWORD RESET FUNCTION AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
+// TODO: PASSWORD RESET FUNCTION <-- NOT LOGGED IN,  PASSWORD UPDATE FUNTION <-- WHEN LOGGED IN,  AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
