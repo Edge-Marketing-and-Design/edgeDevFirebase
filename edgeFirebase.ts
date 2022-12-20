@@ -36,7 +36,9 @@ import {
   createUserWithEmailAndPassword,
   updatePassword,
   reauthenticateWithCredential,
-  EmailAuthProvider
+  EmailAuthProvider,
+  sendPasswordResetEmail,
+  confirmPasswordReset
 } from "firebase/auth";
 
 interface FirestoreQuery {
@@ -75,8 +77,6 @@ interface role {
   collectionPath: "-" | string; // - is root
   role: "admin" | "user";
 }
-
-// TODO: PASSWORD RESET FUNCTION <-- NOT LOGGED IN,  AND USER META UPDATE FUNCTION (ONLY FOR THEMSELVES)
 
 interface specialPermission {
   collectionPath: "-" | string; // - is root
@@ -314,6 +314,40 @@ export const EdgeFirebase = class {
     }
   };
 
+  public sendPasswordReset = async (email: string): Promise<actionResponse> => {
+    try {
+      await sendPasswordResetEmail(this.auth, email);
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: error.message
+      });
+    }
+  };
+
+  public passwordReset = async (
+    password: string,
+    oobCode: string
+  ): Promise<actionResponse> => {
+    try {
+      // await verifyPasswordResetCode(this.auth, oobCode);
+      await confirmPasswordReset(this.auth, oobCode, password);
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: error.message
+      });
+    }
+  };
+
   public setPassword = async (
     oldpassword: string,
     password: string
@@ -336,6 +370,18 @@ export const EdgeFirebase = class {
         message: error.message
       });
     }
+  };
+
+  setUserMeta = async (meta: unknown): Promise<actionResponse> => {
+    for (const [key, value] of Object.entries(meta)) {
+      await updateDoc(doc(this.db, "users/" + this.user.email), {
+        ["meta." + key]: value
+      });
+    }
+    return this.sendResponse({
+      success: true,
+      message: ""
+    });
   };
 
   public removeUser = async (email: string): Promise<actionResponse> => {

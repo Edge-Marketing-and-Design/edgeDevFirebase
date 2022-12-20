@@ -372,6 +372,30 @@ This function allows a user to change their current password while logged in:
 edgeFirebase.setPassword("old-password", "new-password");
 ```
 
+### Password Reset:
+
+For users not logged in (like forgotten password).  This is a two step process if the project is setup to redirect password resets back to a custom password reset page.
+
+Step 1:
+
+```javascript
+edgeFirebase.sendPasswordReset('user@edgemarketingdesign.com');
+```
+
+Step 2: (If the password redirect is setup to go a custom page, you'll need to pull the "oobCode" from the query string and pass that along with the newpassword.)
+
+```javascript
+edgeFirebase.passwordReset('NewPassword123','AAaaAABaaaaAAABBBaaaBBBBAaaaaBABAbbaa');
+```
+
+### Update User Meta:
+
+A user can update their own meta data when logged in.  The object contain meta data will only update/add the keys passed in the object.
+
+```javascript
+edgeFirebase.setUserMeta({ lastName: "Smith" });
+```
+
 # Firestore Basic Document Interactions
 
 ### Adding/Update a Document.
