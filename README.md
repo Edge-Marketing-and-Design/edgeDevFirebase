@@ -242,23 +242,23 @@ edgeFirebase.removeUser("user@edgemarketingdesign.com");
 
 ### List Users
 
-This will list all users that are members of collections that the user running the function has assign access for, it will list them grouped by collections.
+This will list all users that are members of collections that the user running the function has assign access for, it will be a listed index by  email/user id.
 
 ```javascript
 const users = await edgeFirebase.listUsers();
 ```
 
 ```typescript
-interface usersByCollection {
-  [collectionPath: string]: [user];
+interface usersByEmail {
+  [email: string]: [user];
 }
 ```
 
 ```typescript
 interface user {
   email: string;
-  role: "admin" | "user" | null;
-  specialPermission: permissions | null;
+  roles: {[collectionPath: string ]: "admin" | "user"}
+  specialPermissions: {[collectionPath: string]: permissions};
   userId: string;
   docId: string;
   uid: string;

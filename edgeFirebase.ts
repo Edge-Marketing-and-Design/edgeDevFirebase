@@ -103,16 +103,16 @@ interface newUser {
 
 interface user {
   email: string;
-  role: "admin" | "user" | null;
-  specialPermission: permissions | null;
+  roles: {[collectionPath: string ]: "admin" | "user"}
+  specialPermissions: {[collectionPath: string]: permissions};
   userId: string;
   docId: string;
   uid: string;
   last_updated: Date;
 }
 
-interface usersByCollection {
-  [collectionPath: string]: [user];
+interface usersByEmail {
+  [email: string]: [user];
 }
 interface userMeta extends newUser {
   docId: string;
@@ -988,6 +988,7 @@ export const EdgeFirebase = class {
     }
   };
 
+  // TODO: change this function to be synced dynamically on the user object
   public listCollectionsCanAssign = async (): Promise<string[]> => {
     let collectionPaths = [];
     for (const role of this.user.roles) {
@@ -1035,11 +1036,18 @@ export const EdgeFirebase = class {
     return collectionPathList;
   };
 
-  public listUsers = async (): Promise<usersByCollection> => {
+  // TODO: finish making this query by collectionPath if passed.. in furture will be used to get users by collectionPath
+  // because having one giant list of users is not scalable
+  public listUsers = async (collectionPath = ''): Promise<usersByEmail> => {
     const userList = {};
+    if (collectionPath) {
+      const canAssign = await this.permissionCheck("assign", collectionPath);
+      if (!canAssign) {
+        return {}
+      }
+    }
     const collectionPathList = await this.listCollectionsCanAssign();
     for (const collectionPath of collectionPathList) {
-      userList[collectionPath] = [];
       const roleUsers = await getDocs(
         query(
           collection(this.db, "users"),
@@ -1052,16 +1060,20 @@ export const EdgeFirebase = class {
       );
       roleUsers.forEach((doc) => {
         const user = doc.data();
-        userList[collectionPath].push({
-          docId: user.docId,
-          email: user.email,
-          role: user.roles[collectionPath].role,
-          specialPermission: null,
-          meta: user.meta,
-          last_updated: user.last_updated,
-          userId: user.userId,
-          uid: user.uid
-        });
+        if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
+          userList[user.email] = {
+            docId: user.docId,
+            email: user.email,
+            roles: {[collectionPath]: user.roles[collectionPath].role },
+            specialPermissions: {},
+            meta: user.meta,
+            last_updated: user.last_updated,
+            userId: user.userId,
+            uid: user.uid
+          }
+        } else {
+          userList[user.email].roles[collectionPath] = user.roles[collectionPath].role
+        }
       });
       const specialPermissionsUsers = await getDocs(
         query(
@@ -1075,17 +1087,20 @@ export const EdgeFirebase = class {
       );
       specialPermissionsUsers.forEach((doc) => {
         const user = doc.data();
-        userList[collectionPath].push({
-          docId: user.docId,
-          email: user.email,
-          role: null,
-          specialPermission:
-            user.specialPermissions[collectionPath].permissions,
-          meta: user.meta,
-          last_updated: user.last_updated,
-          userId: user.userId,
-          uid: user.uid
-        });
+        if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
+          userList[user.email] = {
+            docId: user.docId,
+            email: user.email,
+            role: {},
+            specialPermissions: {[collectionPath]: user.specialPermissions[collectionPath].permissions},
+            meta: user.meta,
+            last_updated: user.last_updated,
+            userId: user.userId,
+            uid: user.uid
+          }
+        } else {
+         userList[user.email].specialPermissions[collectionPath] = user.specialPermissions[collectionPath].permissions
+        }
       });
     }
     return userList;
