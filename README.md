@@ -257,12 +257,35 @@ interface usersByEmail {
 ```typescript
 interface user {
   email: string;
-  roles: {[collectionPath: string ]: "admin" | "user"}
-  specialPermissions: {[collectionPath: string]: permissions};
+  roles: role[];
+  specialPermissions: specialPermission[];
   userId: string;
   docId: string;
   uid: string;
   last_updated: Date;
+}
+```
+
+```typescript
+interface role {
+  collectionPath: "-" | string; // - is root
+  role: "admin" | "user";
+}
+```
+
+```typescript
+interface specialPermission {
+  collectionPath: "-" | string; // - is root
+  permissions: permissions;
+}
+```
+
+```typescript
+interface permissions {
+  assign: boolean;
+  read: boolean;
+  write: boolean;
+  delete: boolean;
 }
 ```
 

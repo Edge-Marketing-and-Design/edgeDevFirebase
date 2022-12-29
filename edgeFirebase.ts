@@ -103,8 +103,8 @@ interface newUser {
 
 interface user {
   email: string;
-  roles: {[collectionPath: string ]: "admin" | "user"}
-  specialPermissions: {[collectionPath: string]: permissions};
+  roles: role[];
+  specialPermissions: specialPermission[];
   userId: string;
   docId: string;
   uid: string;
@@ -438,19 +438,28 @@ export const EdgeFirebase = class {
       newUser.specialPermissions
     );
     if (canAssignRole.canDo && canAssignSpecialPermissions.canDo) {
-      const userMeta: userMeta = {
-        docId: newUser.email,
-        userId: "",
-        email: newUser.email,
-        roles: newUser.roles,
-        specialPermissions: newUser.specialPermissions,
-        meta: newUser.meta
-      };
-      this.generateUserMeta(userMeta);
-      return this.sendResponse({
-        success: true,
-        message: ""
-      });
+      const userRef = doc(this.db, "users", newUser.email);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) {
+        const userMeta: userMeta = {
+          docId: newUser.email,
+          userId: "",
+          email: newUser.email,
+          roles: newUser.roles,
+          specialPermissions: newUser.specialPermissions,
+          meta: newUser.meta
+        };
+        this.generateUserMeta(userMeta);
+        return this.sendResponse({
+          success: true,
+          message: ""
+        });
+      } else {
+        return this.sendResponse({
+          success: false,
+          message: "User already exists"
+        });
+      }
     } else {
       return this.sendResponse({
         success: false,
@@ -1064,15 +1073,15 @@ export const EdgeFirebase = class {
           userList[user.email] = {
             docId: user.docId,
             email: user.email,
-            roles: {[collectionPath]: user.roles[collectionPath].role },
-            specialPermissions: {},
+            roles: [{collectionPath, role: user.roles[collectionPath].role }],
+            specialPermissions: [],
             meta: user.meta,
             last_updated: user.last_updated,
             userId: user.userId,
             uid: user.uid
           }
         } else {
-          userList[user.email].roles[collectionPath] = user.roles[collectionPath].role
+          userList[user.email].roles.push({ collectionPath, role: user.roles[collectionPath].role }) 
         }
       });
       const specialPermissionsUsers = await getDocs(
@@ -1091,15 +1100,15 @@ export const EdgeFirebase = class {
           userList[user.email] = {
             docId: user.docId,
             email: user.email,
-            role: {},
-            specialPermissions: {[collectionPath]: user.specialPermissions[collectionPath].permissions},
+            role: [],
+            specialPermissions: [{ collectionPath, permissions: user.specialPermissions[collectionPath].permissions }],
             meta: user.meta,
             last_updated: user.last_updated,
             userId: user.userId,
             uid: user.uid
           }
         } else {
-         userList[user.email].specialPermissions[collectionPath] = user.specialPermissions[collectionPath].permissions
+         userList[user.email].specialPermissions.push({ collectionPath, permissions: user.specialPermissions[collectionPath].permissions })
         }
       });
     }
@@ -1186,7 +1195,7 @@ export const EdgeFirebase = class {
     }
   };
 
-  public storeUserRoles = async (
+  private storeUserRoles = async (
     email: string,
     collectionPath: string,
     role: "admin" | "user"
