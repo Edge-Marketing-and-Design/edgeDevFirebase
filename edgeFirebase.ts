@@ -92,6 +92,7 @@ interface UserDataObject {
   meta: object;
   roles: role[];
   specialPermissions: specialPermission[];
+  canAssignCollectionPaths: string[];
 }
 
 interface newUser {
@@ -209,6 +210,7 @@ export const EdgeFirebase = class {
         }
       }
       this.user.specialPermissions = specialPermissions;
+      this.listCollectionsCanAssign()
     }
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
@@ -218,7 +220,7 @@ export const EdgeFirebase = class {
             email: this.user.email,
             roles: [],
             specialPermissions: [],
-            meta: {}
+            meta: {},
           });
           this.user.meta = {};
         } else {
@@ -245,6 +247,7 @@ export const EdgeFirebase = class {
             }
           }
           this.user.specialPermissions = specialPermissions;
+          this.listCollectionsCanAssign()
         }
       }
     );
@@ -724,7 +727,8 @@ export const EdgeFirebase = class {
     logInErrorMessage: "",
     meta: {},
     roles: [],
-    specialPermissions: []
+    specialPermissions: [],
+    canAssignCollectionPaths: [],
   });
 
   public getDocData = async (
@@ -997,8 +1001,7 @@ export const EdgeFirebase = class {
     }
   };
 
-  // TODO: change this function to be synced dynamically on the user object
-  public listCollectionsCanAssign = async (): Promise<string[]> => {
+  private listCollectionsCanAssign = async (): Promise<void> => {
     let collectionPaths = [];
     for (const role of this.user.roles) {
       const canAssign = await this.permissionCheck(
@@ -1042,75 +1045,71 @@ export const EdgeFirebase = class {
       }
     }
     collectionPathList = [...new Set(collectionPathList)];
-    return collectionPathList;
+    this.user.canAssignCollectionPaths = collectionPathList;
   };
 
-  // TODO: finish making this query by collectionPath if passed.. in furture will be used to get users by collectionPath
-  // because having one giant list of users is not scalable
   public listUsers = async (collectionPath = ''): Promise<usersByEmail> => {
     const userList = {};
-    if (collectionPath) {
-      const canAssign = await this.permissionCheck("assign", collectionPath);
-      if (!canAssign) {
-        return {}
+
+    for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
+
+      if (collectionPathCheck.startsWith(collectionPath.replaceAll('/', '-'))) {
+        const roleUsers = await getDocs(
+          query(
+            collection(this.db, "users"),
+            where(
+              "roles." + collectionPathCheck + ".collectionPath",
+              "==",
+              collectionPathCheck
+            )
+          )
+        );
+            
+        roleUsers.forEach((doc) => {
+          const user = doc.data();
+          if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
+            userList[user.email] = {
+              docId: user.docId,
+              email: user.email,
+              roles: [{collectionPathCheck, role: user.roles[collectionPathCheck].role }],
+              specialPermissions: [],
+              meta: user.meta,
+              last_updated: user.last_updated,
+              userId: user.userId,
+              uid: user.uid
+            }
+          } else {
+            userList[user.email].roles.push({ collectionPathCheck, role: user.roles[collectionPathCheck].role }) 
+          }
+        });
+        const specialPermissionsUsers = await getDocs(
+          query(
+            collection(this.db, "users"),
+            where(
+              "specialPermissions." + collectionPathCheck + ".collectionPath",
+              "==",
+              collectionPathCheck
+            )
+          )
+        );
+        specialPermissionsUsers.forEach((doc) => {
+          const user = doc.data();
+          if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
+            userList[user.email] = {
+              docId: user.docId,
+              email: user.email,
+              role: [],
+              specialPermissions: [{ collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }],
+              meta: user.meta,
+              last_updated: user.last_updated,
+              userId: user.userId,
+              uid: user.uid
+            }
+          } else {
+          userList[user.email].specialPermissions.push({ collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions })
+          }
+        });
       }
-    }
-    const collectionPathList = await this.listCollectionsCanAssign();
-    for (const collectionPath of collectionPathList) {
-      const roleUsers = await getDocs(
-        query(
-          collection(this.db, "users"),
-          where(
-            "roles." + collectionPath + ".collectionPath",
-            "==",
-            collectionPath
-          )
-        )
-      );
-      roleUsers.forEach((doc) => {
-        const user = doc.data();
-        if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-          userList[user.email] = {
-            docId: user.docId,
-            email: user.email,
-            roles: [{collectionPath, role: user.roles[collectionPath].role }],
-            specialPermissions: [],
-            meta: user.meta,
-            last_updated: user.last_updated,
-            userId: user.userId,
-            uid: user.uid
-          }
-        } else {
-          userList[user.email].roles.push({ collectionPath, role: user.roles[collectionPath].role }) 
-        }
-      });
-      const specialPermissionsUsers = await getDocs(
-        query(
-          collection(this.db, "users"),
-          where(
-            "specialPermissions." + collectionPath + ".collectionPath",
-            "==",
-            collectionPath
-          )
-        )
-      );
-      specialPermissionsUsers.forEach((doc) => {
-        const user = doc.data();
-        if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-          userList[user.email] = {
-            docId: user.docId,
-            email: user.email,
-            role: [],
-            specialPermissions: [{ collectionPath, permissions: user.specialPermissions[collectionPath].permissions }],
-            meta: user.meta,
-            last_updated: user.last_updated,
-            userId: user.userId,
-            uid: user.uid
-          }
-        } else {
-         userList[user.email].specialPermissions.push({ collectionPath, permissions: user.specialPermissions[collectionPath].permissions })
-        }
-      });
     }
     return userList;
   };

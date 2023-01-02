@@ -242,10 +242,10 @@ edgeFirebase.removeUser("user@edgemarketingdesign.com");
 
 ### List Users
 
-This will list all users that are members of collections that the user running the function has assign access for, it will be a listed index by  email/user id.
+This will list all users that are members of the collection and subcollections passed to the function that the user running the function has assign access for, it will be a listed index by  email/user id.
 
 ```javascript
-const users = await edgeFirebase.listUsers();
+const users = await edgeFirebase.listUsers("myItems");
 ```
 
 ```typescript
@@ -289,16 +289,6 @@ interface permissions {
 }
 ```
 
-
-
-### List Collections with Assign Access
-
-This function will list all collections that the user running it has assign access for. 
-
-```javascript
-const collections = await edgeFirebase.listCollectionsCanAssign();  // returns array of strings (collection paths)
-```
-
 # Firebase Authentication
 
 (currently only sign in with email and password is supported)
@@ -325,7 +315,8 @@ interface UserDataObject {
   logInErrorMessage: string;
   meta: object;
   roles: role[]; //see role below
-  specialPermissions: specialPermission[]; //see specialPermission bleow
+  specialPermissions: specialPermission[]; //see specialPermission below
+  canAssignCollectionPaths: string[]; //an array of collectionPaths that the user has "assign" access to
 }
 
 // sub types of UserDataObject:
