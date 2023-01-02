@@ -1071,7 +1071,7 @@ export const EdgeFirebase = class {
             userList[user.email] = {
               docId: user.docId,
               email: user.email,
-              roles: [{collectionPathCheck, role: user.roles[collectionPathCheck].role }],
+              roles: [{collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }],
               specialPermissions: [],
               meta: user.meta,
               last_updated: user.last_updated,
@@ -1079,7 +1079,7 @@ export const EdgeFirebase = class {
               uid: user.uid
             }
           } else {
-            userList[user.email].roles.push({ collectionPathCheck, role: user.roles[collectionPathCheck].role }) 
+            userList[user.email].roles.push({ collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }) 
           }
         });
         const specialPermissionsUsers = await getDocs(
@@ -1099,14 +1099,14 @@ export const EdgeFirebase = class {
               docId: user.docId,
               email: user.email,
               role: [],
-              specialPermissions: [{ collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }],
+              specialPermissions: [{ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }],
               meta: user.meta,
               last_updated: user.last_updated,
               userId: user.userId,
               uid: user.uid
             }
           } else {
-          userList[user.email].specialPermissions.push({ collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions })
+          userList[user.email].specialPermissions.push({ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions })
           }
         });
       }
