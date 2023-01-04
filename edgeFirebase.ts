@@ -1238,6 +1238,24 @@ export const EdgeFirebase = class {
     }
   };
 
+  public removeCollectionPermissions = async (
+    collectionPath: string,
+  ): Promise<actionResponse> => {
+    const canAssign = await this.permissionCheck("assign", collectionPath);
+    if (canAssign) {
+      await deleteDoc(doc(this.db, "collection-data", collectionPath.replaceAll("/", "-")));
+      return this.sendResponse({
+        success: true,
+        message: ""
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: "Cannot remove permissions for collection path: " + collectionPath
+      });
+    }
+  };
+
   public storeCollectionPermissions = async (
     collectionPath: string,
     role: "admin" | "user",

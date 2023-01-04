@@ -170,6 +170,15 @@ edgeFirebase.storeCollectionPermissions(
  );
 ```
 
+Deleting collection permissions. This is done to "clean up" whenever a collection path is being deleted.
+
+```javascript
+  edgeFirebase.removeCollectionPermissions(
+    "myItems/subitems/things")
+```
+
+
+
 ### User roles for collections
 
 Users are assigned roles based on collection paths.  A role assigned by a collection path that has sub collections will also determine what the user can do on all sub collections or a user can be assigned a role specifically for a sub collection only.  For example if a user is assigned as admin for "myItems/subitems/things" they will only have admin acces to that collection. But if the user is assigned as an admin for "myItems" they will have the admin permissions for "myItems" and all sub collections of "myItems".
