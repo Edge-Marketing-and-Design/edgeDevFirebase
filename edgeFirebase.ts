@@ -210,7 +210,7 @@ export const EdgeFirebase = class {
         }
       }
       this.user.specialPermissions = specialPermissions;
-      await this.listCollectionsCanAssign()
+      this.listCollectionsCanAssign()
     }
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
@@ -1262,7 +1262,7 @@ export const EdgeFirebase = class {
     permissions: permissions
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
-
+    // TODO: check if collectionPath starts with "users" and deny if so
     if (canAssign) {
       if (role === "admin" || role === "user") {
         const currentTime = new Date().getTime();
