@@ -148,6 +148,7 @@ interface firebaseConfig {
 interface actionResponse {
   success: boolean;
   message: string;
+  meta: object;
 }
 
 interface permissionStatus {
@@ -266,7 +267,6 @@ export const EdgeFirebase = class {
         this.user.uid = userAuth.uid;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
-
         this.startUserMetaSync();
       } else {
         this.user.email = "";
@@ -288,7 +288,8 @@ export const EdgeFirebase = class {
       if (user.userId) {
         return this.sendResponse({
           success: false,
-          message: "User already registered"
+          message: "User already registered",
+          meta: {}
         });
       } else {
         createUserWithEmailAndPassword(
@@ -305,14 +306,16 @@ export const EdgeFirebase = class {
           }
           return this.sendResponse({
             success: true,
-            message: ""
+            message: "",
+            meta: {}
           });
         });
       }
     } else {
       return this.sendResponse({
         success: false,
-        message: "User doesn't exist"
+        message: "User doesn't exist",
+        meta: {}
       });
     }
   };
@@ -322,12 +325,14 @@ export const EdgeFirebase = class {
       await sendPasswordResetEmail(this.auth, email);
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } catch (error) {
       return this.sendResponse({
         success: false,
-        message: error.message
+        message: error.message,
+        meta: {}
       });
     }
   };
@@ -341,12 +346,14 @@ export const EdgeFirebase = class {
       await confirmPasswordReset(this.auth, oobCode, password);
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } catch (error) {
       return this.sendResponse({
         success: false,
-        message: error.message
+        message: error.message,
+        meta: {}
       });
     }
   };
@@ -365,12 +372,14 @@ export const EdgeFirebase = class {
       await updatePassword(user, password);
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } catch (error) {
       return this.sendResponse({
         success: false,
-        message: error.message
+        message: error.message,
+        meta: {}
       });
     }
   };
@@ -383,7 +392,8 @@ export const EdgeFirebase = class {
     }
     return this.sendResponse({
       success: true,
-      message: ""
+      message: "",
+      meta: {}
     });
   };
 
@@ -421,12 +431,14 @@ export const EdgeFirebase = class {
     if (removedFrom.length > 0) {
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
-        message: "You do not have permission to remove this user"
+        message: "You do not have permission to remove this user",
+        meta: {}
       });
     }
   };
@@ -455,12 +467,14 @@ export const EdgeFirebase = class {
         this.generateUserMeta(userMeta);
         return this.sendResponse({
           success: true,
-          message: ""
+          message: "",
+          meta: {}
         });
       } else {
         return this.sendResponse({
           success: false,
-          message: "User already exists"
+          message: "User already exists",
+          meta: {}
         });
       }
     } else {
@@ -470,7 +484,8 @@ export const EdgeFirebase = class {
           "Cannot assign role or special permission for collection path(s): " +
           canAssignRole.badCollectionPaths
             .concat(canAssignSpecialPermissions.badCollectionPaths)
-            .join(", ")
+            .join(", "),
+        meta: {}
       });
     }
   };
@@ -916,12 +931,14 @@ export const EdgeFirebase = class {
           }
           return sendResponse({
             success: true,
-            message: ""
+            message: "",
+            meta: {}
           });
         } else {
           return sendResponse({
             success: false,
-            message: `You do not have permission to read from "${collectionPath}"`
+            message: `You do not have permission to read from "${collectionPath}"`,
+            meta: {}
           });
         }
       };
@@ -991,12 +1008,14 @@ export const EdgeFirebase = class {
       this.unsubscibe[collectionPath] = unsubscribe;
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
-        message: `You do not have permission to read from "${collectionPath}"`
+        message: `You do not have permission to read from "${collectionPath}"`,
+        meta: {}
       });
     }
   };
@@ -1125,13 +1144,15 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
         message:
-          "Cannot remove permissions for collection path: " + collectionPath
+          "Cannot remove permissions for collection path: " + collectionPath,
+          meta: {}
       });
     }
   };
@@ -1148,13 +1169,15 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
         message:
-          "Cannot remove permissions for collection path: " + collectionPath
+          "Cannot remove permissions for collection path: " + collectionPath,
+          meta: {}
       });
     }
   };
@@ -1177,19 +1200,22 @@ export const EdgeFirebase = class {
         updateDoc(doc(this.db, "users/" + email), permissionItem);
         return this.sendResponse({
           success: true,
-          message: ""
+          message: "",
+          meta: {}
         });
       } else {
         return this.sendResponse({
           success: false,
-          message: collectionPath + " is not a valid collection path"
+          message: collectionPath + " is not a valid collection path",
+          meta: {}
         });
       }
     } else {
       return this.sendResponse({
         success: false,
         message:
-          "Cannot assign permissions for collection path: " + collectionPath
+          "Cannot assign permissions for collection path: " + collectionPath,
+        meta: {}
       });
     }
   };
@@ -1215,25 +1241,29 @@ export const EdgeFirebase = class {
           updateDoc(doc(this.db, "users/" + email), roleItem);
           return this.sendResponse({
             success: true,
-            message: ""
+            message: "",
+            meta: {}
           });
         } else {
           return this.sendResponse({
             success: false,
-            message: collectionPath + " is not a valid collection path"
+            message: collectionPath + " is not a valid collection path",
+            meta: {}
           });
         }
       } else {
         return this.sendResponse({
           success: false,
-          message: "Role must be either 'admin' or 'user'"
+          message: "Role must be either 'admin' or 'user'",
+          meta: {}
         });
       }
     } else {
       return this.sendResponse({
         success: false,
         message:
-          "Cannot assign permissions for collection path: " + collectionPath
+          "Cannot assign permissions for collection path: " + collectionPath,
+        meta: {}
       });
     }
   };
@@ -1246,12 +1276,14 @@ export const EdgeFirebase = class {
       await deleteDoc(doc(this.db, "collection-data", collectionPath.replaceAll("/", "-")));
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
-        message: "Cannot remove permissions for collection path: " + collectionPath
+        message: "Cannot remove permissions for collection path: " + collectionPath,
+        meta: {}
       });
     }
   };
@@ -1290,19 +1322,22 @@ export const EdgeFirebase = class {
 
         return this.sendResponse({
           success: true,
-          message: ""
+          message: "",
+          meta: {}
         });
       } else {
         return this.sendResponse({
           success: false,
-          message: "Role must be either 'admin' or 'user'"
+          message: "Role must be either 'admin' or 'user'",
+          meta: {}
         });
       }
     } else {
       return this.sendResponse({
         success: false,
         message:
-          "Cannot assign permissions for collection path: " + collectionPath
+          "Cannot assign permissions for collection path: " + collectionPath,
+        meta: {}
       });
     }
   };
@@ -1317,7 +1352,8 @@ export const EdgeFirebase = class {
     if (!canWrite) {
       return this.sendResponse({
         success: false,
-        message: `You do not have permission to write to "${collectionPath}"`
+        message: `You do not have permission to write to "${collectionPath}"`,
+        meta: {}
       });
     } else {
       if (generatePermissions) {
@@ -1340,6 +1376,11 @@ export const EdgeFirebase = class {
           }
         }
         setDoc(doc(this.db, collectionPath, docId), cloneItem);
+        return this.sendResponse({
+          success: true,
+          message: "",
+          meta: {docId}
+        });
       } else {
         const docRef = await addDoc(
           collection(this.db, collectionPath),
@@ -1356,11 +1397,12 @@ export const EdgeFirebase = class {
           { ...cloneItem, docId: docRef.id },
           generatePermissions
         );
+        return this.sendResponse({
+          success: true,
+          message: "",
+          meta: {docId: docRef.id}
+        });
       }
-      return this.sendResponse({
-        success: true,
-        message: ""
-      });
     }
   };
 
@@ -1381,12 +1423,14 @@ export const EdgeFirebase = class {
       deleteDoc(doc(this.db, collectionPath, docId));
       return this.sendResponse({
         success: true,
-        message: ""
+        message: "",
+        meta: {}
       });
     } else {
       return this.sendResponse({
         success: false,
-        message: `You do not have permission to delete from "${collectionPath}"`
+        message: `You do not have permission to delete from "${collectionPath}"`,
+        meta: {}
       });
     }
   };
