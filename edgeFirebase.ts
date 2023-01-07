@@ -211,7 +211,7 @@ export const EdgeFirebase = class {
         }
       }
       this.user.specialPermissions = specialPermissions;
-      this.listCollectionsCanAssign()
+      await this.listCollectionsCanAssign()
     }
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
