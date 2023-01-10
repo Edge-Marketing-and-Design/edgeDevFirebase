@@ -260,9 +260,13 @@ edgeFirebase.stopUsersSnapshot();
 ```
 
 ```vue
+<script setup>
+//users is a ref and needs to be accessed via "value"
+ console.log(edgeFirebase.users.value);
+</script>
 <template>
   <div>
-    <div v-for="user in edgeFirebase.users" :key="item">
+    <div v-for="user in edgeFirebase.users.value" :key="item">
       {{ user.email }}
     </div>
   </div>
