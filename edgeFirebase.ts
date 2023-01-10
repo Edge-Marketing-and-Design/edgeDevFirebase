@@ -1133,7 +1133,7 @@ export const EdgeFirebase = class {
     });
   }
 
-  public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
+  public startUsersSnapshot = (collectionPath = ''): void => {
     this.stopUsersSnapshot();
     for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
       
@@ -1147,7 +1147,7 @@ export const EdgeFirebase = class {
             collectionPathCheck
           )
         )
-        const rolesUnsubscribe = await onSnapshot(q, (querySnapshot) => {
+        const rolesUnsubscribe = onSnapshot(q, (querySnapshot) => {
           const items = {};
           querySnapshot.forEach((doc) => {
             const user = doc.data();
@@ -1177,7 +1177,7 @@ export const EdgeFirebase = class {
           )
         )
 
-        const specialPermissionsunsubscribe = await onSnapshot(q, (querySnapshot) => {
+        const specialPermissionsunsubscribe = onSnapshot(q, (querySnapshot) => {
           const items = {};
           querySnapshot.forEach((doc) => {
             const user = doc.data();
