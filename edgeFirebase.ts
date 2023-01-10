@@ -1130,12 +1130,12 @@ export const EdgeFirebase = class {
     const keys = Object.keys(this.usersByCollections).filter((key) => key.startsWith('ROLES|') || key.startsWith('SPECIALPERMISSIONS|'));
     keys.forEach((key) => {
       this.stopSnapshot(key);
+      delete this.usersByCollections[key];
     });
   }
 
   public startUsersSnapshot = (collectionPath = ''): void => {
     this.stopUsersSnapshot();
-    this.usersByCollections = {};
     for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
       
       if (collectionPathCheck.startsWith(collectionPath.replaceAll('/', '-'))) {
