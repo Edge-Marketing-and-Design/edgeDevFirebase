@@ -213,6 +213,7 @@ export const EdgeFirebase = class {
       this.user.specialPermissions = specialPermissions;
       await this.listCollectionsCanAssign()
     }
+    this.stopSnapshot('userMeta')
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.email),
       (doc) => {
@@ -733,7 +734,6 @@ export const EdgeFirebase = class {
 
   // Simple Store Items (add matching key per firebase collection)
   public data: CollectionDataObject = reactive({});
-  
   private usersByCollections: CollectionDataObject = reactive({});
 
   public users = computed(() => {
@@ -1051,6 +1051,7 @@ export const EdgeFirebase = class {
   ): Promise<actionResponse> => {
     const canRead = await this.permissionCheck("read", collectionPath);
     this.data[collectionPath] = {};
+    this.stopSnapshot(collectionPath);
     this.unsubscibe[collectionPath] = null;
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max);
@@ -1125,76 +1126,15 @@ export const EdgeFirebase = class {
     this.user.canAssignCollectionPaths = collectionPathList;
   };
 
-  public listUsers = async (collectionPath = ''): Promise<usersByEmail> => {
-    const userList = {};
-
-    for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
-
-      if (collectionPathCheck.startsWith(collectionPath.replaceAll('/', '-'))) {
-        const roleUsers = await getDocs(
-          query(
-            collection(this.db, "users"),
-            where(
-              "roles." + collectionPathCheck + ".collectionPath",
-              "==",
-              collectionPathCheck
-            )
-          )
-        );
-            
-        roleUsers.forEach((doc) => {
-          const user = doc.data();
-          if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-            userList[user.email] = {
-              docId: user.docId,
-              email: user.email,
-              roles: [{collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }],
-              specialPermissions: [],
-              meta: user.meta,
-              last_updated: user.last_updated,
-              userId: user.userId,
-              uid: user.uid
-            }
-          } else {
-            userList[user.email].roles.push({ collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }) 
-          }
-        });
-        const specialPermissionsUsers = await getDocs(
-          query(
-            collection(this.db, "users"),
-            where(
-              "specialPermissions." + collectionPathCheck + ".collectionPath",
-              "==",
-              collectionPathCheck
-            )
-          )
-        );
-        specialPermissionsUsers.forEach((doc) => {
-          const user = doc.data();
-          if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-            userList[user.email] = {
-              docId: user.docId,
-              email: user.email,
-              role: [],
-              specialPermissions: [{ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }],
-              meta: user.meta,
-              last_updated: user.last_updated,
-              userId: user.userId,
-              uid: user.uid
-            }
-          } else {
-          userList[user.email].specialPermissions.push({ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions })
-          }
-        });
-      }
-    }
-    return userList;
-  };
-
-  // TODO: stop users snapshot
+  public stopUsersSnapshot = (): void => {
+    const keys = Object.keys(this.usersByCollections).filter((key) => key.startsWith('ROLES|') || key.startsWith('SPECIALPERMISSIONS|'));
+    keys.forEach((key) => {
+      this.stopSnapshot(key);
+    });
+  }
 
   public startUsersSnapshot = (collectionPath = ''): void => {
-
+    this.stopUsersSnapshot();
     for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
       
       if (collectionPathCheck.startsWith(collectionPath.replaceAll('/', '-'))) {

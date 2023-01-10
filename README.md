@@ -249,12 +249,24 @@ edgeFirebase.removeUser("user@edgemarketingdesign.com");
 
 
 
-### List Users
+### Users Snapshot Data
 
-This will list all users that are members of the collection and subcollections passed to the function that the user running the function has assign access for, it will be a listed index by  email/user id.
+This will create a reactive object (users) that contains the members of the collection and subcollections passed to the snapshot that the user running the function has assign access for, it will be a listed index by  email/user id.  Passing no collection will get all users that the user running has assign access for.
 
 ```javascript
-const users = await edgeFirebase.listUsers("myItems");
+edgeFirebase.startUsersSnapshot("myItems");
+// Stop users snapshot:
+edgeFirebase.stopUsersSnapshot();
+```
+
+```vue
+<template>
+  <div>
+    <div v-for="user in edgeFirebase.users" :key="item">
+      {{ user.email }}
+    </div>
+  </div>
+</template>
 ```
 
 ```typescript
