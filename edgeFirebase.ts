@@ -1135,6 +1135,7 @@ export const EdgeFirebase = class {
 
   public startUsersSnapshot = (collectionPath = ''): void => {
     this.stopUsersSnapshot();
+    this.usersByCollections = {};
     for (const collectionPathCheck of this.user.canAssignCollectionPaths) {
       
       if (collectionPathCheck.startsWith(collectionPath.replaceAll('/', '-'))) {
