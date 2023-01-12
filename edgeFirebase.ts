@@ -689,12 +689,13 @@ export const EdgeFirebase = class {
 
   // Composable to login and set persistence
   public logIn = (credentials: Credentials, isPersistant = false): void => {
-    this.logOut();
-    let persistence: Persistence = browserSessionPersistence;
-    if (isPersistant) {
-      persistence = browserLocalPersistence;
-    }
-    setPersistence(this.auth, persistence)
+    try {
+      this.logOut();
+      let persistence: Persistence = browserSessionPersistence;
+      if (isPersistant) {
+        persistence = browserLocalPersistence;
+      }
+      setPersistence(this.auth, persistence)
       .then(() => {
         signInWithEmailAndPassword(
           this.auth,
@@ -702,7 +703,12 @@ export const EdgeFirebase = class {
           credentials.password
         )
           .then(() => {
-            // do nothing
+            this.user.email = "";
+            this.user.uid = null;
+
+            this.user.loggedIn = false;
+            this.user.logInError = false;
+            this.user.logInErrorMessage = "Login Sent to Firebase"
           })
           .catch((error) => {
             this.user.email = "";
@@ -721,6 +727,14 @@ export const EdgeFirebase = class {
         this.user.logInError = true;
         this.user.logInErrorMessage = error.code + ": " + error.message;
       });
+    } catch (error) {
+      this.user.email = "";
+      this.user.uid = null;
+
+      this.user.loggedIn = false;
+      this.user.logInError = true;
+      this.user.logInErrorMessage = JSON.stringify(error);
+    }
   };
 
   // Keeping this for reference on how to Type a Ref.
