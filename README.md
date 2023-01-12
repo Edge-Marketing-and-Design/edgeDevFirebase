@@ -32,7 +32,8 @@ const config = {
     messagingSenderId: "your-messagingSenderId",
     appId: "your-appId"
   };
-const edgeFirebase = new EdgeFirebase(config);
+const isPersistant = true // If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
+const edgeFirebase = new EdgeFirebase(config, isPersistant);
 export { edgeFirebase };
 ```
 
@@ -50,6 +51,7 @@ import App from "./App.vue";
 
 //edgeFirebase Plugin 
 import eFb from "@edgedev/firebase";
+const isPersistant = true // If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
 app.use(eFb, {
     apiKey: "your-apiKey",
     authDomain: "your-authDomain",
@@ -57,7 +59,7 @@ app.use(eFb, {
     storageBucket: "your-storageBucket",
     messagingSenderId: "your-messagingSenderId",
     appId: "your-appId"
-  })
+  }, isPersistant)
 //end edgeFirebase
 
 app.mount("#app");
@@ -318,14 +320,12 @@ interface permissions {
 
 (currently only sign in with email and password is supported)
 
-If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
 ```javascript
   edgeFirebase.logIn(
     {
       email: "devs@edgemarketing.com",
       password: "pasword"
-    },
-    true // : persistence
+    }
   );
 ```
 

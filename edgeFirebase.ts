@@ -26,7 +26,6 @@ import {
 
 import {
   initializeAuth,
-  setPersistence,
   browserSessionPersistence,
   browserLocalPersistence,
   Persistence,
@@ -165,11 +164,16 @@ export const EdgeFirebase = class {
       storageBucket: "",
       messagingSenderId: "",
       appId: ""
-    }
+    },
+    isPersistant: false
   ) {
     this.firebaseConfig = firebaseConfig;
     this.app = initializeApp(this.firebaseConfig);
-    this.auth = initializeAuth(this.app);
+    let persistence: Persistence = browserSessionPersistence;
+    if (isPersistant) {
+      persistence = browserLocalPersistence;
+    }
+    this.auth = initializeAuth(this.app, { persistence });
     this.db = getFirestore(this.app);
     this.setOnAuthStateChanged();
   }
@@ -688,39 +692,24 @@ export const EdgeFirebase = class {
   };
 
   // Composable to login and set persistence
-  public logIn = (credentials: Credentials, isPersistant = false): void => {
+  public logIn = (credentials: Credentials): void => {
     this.logOut();
-    let persistence: Persistence = browserSessionPersistence;
-    if (isPersistant) {
-      persistence = browserLocalPersistence;
-    }
-    setPersistence(this.auth, persistence)
-      .then(() => {
-        signInWithEmailAndPassword(
-          this.auth,
-          credentials.email,
-          credentials.password
-        )
-          .then(() => {
-            // do nothing
-          })
-          .catch((error) => {
-            this.user.email = "";
-            this.user.uid = null;
+    signInWithEmailAndPassword(
+      this.auth,
+      credentials.email,
+      credentials.password
+    )
+    .then(() => {
+      // do nothing
+    })
+    .catch((error) => {
+      this.user.email = "";
+      this.user.uid = null;
 
-            this.user.loggedIn = false;
-            this.user.logInError = true;
-            this.user.logInErrorMessage = error.code + ": " + error.message;
-          });
-      })
-      .catch((error) => {
-        this.user.email = "";
-        this.user.uid = null;
-
-        this.user.loggedIn = false;
-        this.user.logInError = true;
-        this.user.logInErrorMessage = error.code + ": " + error.message;
-      });
+      this.user.loggedIn = false;
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.code + ": " + error.message;
+    });
   };
 
   // Keeping this for reference on how to Type a Ref.
