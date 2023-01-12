@@ -71,6 +71,7 @@ Add a file (whatever.client.ts) to your "plugins" folder with the following code
 ***-Note the ".client" in the file name. If the file doesn't have that in the name you must disabled SSR in the nuxt config.***
 ```javascript
 import eFb from "@edgedev/firebase";
+const isPersistant = true // If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
 export default defineNuxtPlugin((nuxtApp) => {
   nuxtApp.vueApp.use(eFb, {
     apiKey: "your-apiKey",
@@ -79,7 +80,7 @@ export default defineNuxtPlugin((nuxtApp) => {
     storageBucket: "your-storageBucket",
     messagingSenderId: "your-messagingSenderId",
     appId: "your-appId"
-  });
+  }, isPersistant);
 });
 ```
 ***-Alternatively you can disable SSR for your entire Nuxt project instead of naming the plugin with ".client", update the nuxt.config.ts file:***
