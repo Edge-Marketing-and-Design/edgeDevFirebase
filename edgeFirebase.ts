@@ -274,7 +274,6 @@ export const EdgeFirebase = class {
         this.user.uid = null;
         this.user.loggedIn = false;
         this.user.logInError = false;
-        this.user.logInErrorMessage = "";
       }
     });
   };
@@ -703,10 +702,6 @@ export const EdgeFirebase = class {
           credentials.password
         )
           .then(() => {
-            this.user.email = "";
-            this.user.uid = null;
-
-            this.user.loggedIn = false;
             this.user.logInError = false;
             this.user.logInErrorMessage = "Login Sent to Firebase"
           })
