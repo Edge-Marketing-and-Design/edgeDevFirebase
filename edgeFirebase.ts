@@ -688,14 +688,17 @@ export const EdgeFirebase = class {
 
   // Composable to login and set persistence
   public logIn = (credentials: Credentials, isPersistant = false): void => {
+    this.user.logInErrorMessage = "Initial Click"
     try {
       this.logOut();
+      this.user.logInErrorMessage = "After Logout"
       let persistence: Persistence = browserSessionPersistence;
       if (isPersistant) {
         persistence = browserLocalPersistence;
       }
       setPersistence(this.auth, persistence)
       .then(() => {
+        this.user.logInErrorMessage = "After Persistence"
         signInWithEmailAndPassword(
           this.auth,
           credentials.email,
