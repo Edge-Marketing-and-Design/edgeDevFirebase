@@ -25,7 +25,7 @@ import {
 } from "firebase/firestore";
 
 import {
-  getAuth,
+  initializeAuth,
   setPersistence,
   browserSessionPersistence,
   browserLocalPersistence,
@@ -169,7 +169,7 @@ export const EdgeFirebase = class {
   ) {
     this.firebaseConfig = firebaseConfig;
     this.app = initializeApp(this.firebaseConfig);
-    this.auth = getAuth(this.app);
+    this.auth = initializeAuth(this.app);
     this.db = getFirestore(this.app);
     this.setOnAuthStateChanged();
   }
@@ -274,6 +274,7 @@ export const EdgeFirebase = class {
         this.user.uid = null;
         this.user.loggedIn = false;
         this.user.logInError = false;
+        this.user.logInErrorMessage = "";
       }
     });
   };
@@ -687,44 +688,39 @@ export const EdgeFirebase = class {
   };
 
   // Composable to login and set persistence
-  public logIn = async (credentials: Credentials, isPersistant = false): Promise<void> => {
-    this.user.logInErrorMessage = "Initial Click"
-    try {
-      this.logOut();
-      this.user.logInErrorMessage = "After Logout"
-      let persistence: Persistence = browserSessionPersistence;
-      if (isPersistant) {
-        persistence = browserLocalPersistence;
-      }
-      await setPersistence(this.auth, persistence);
-     
-      this.user.logInErrorMessage = "After Persistence"
-      
-      signInWithEmailAndPassword(
-        this.auth,
-        credentials.email,
-        credentials.password
-      )
-        .then(() => {
-          this.user.logInError = false;
-          this.user.logInErrorMessage = "Login Sent to Firebase"
-        })
-        .catch((error) => {
-          this.user.email = "";
-          this.user.uid = null;
-
-          this.user.loggedIn = false;
-          this.user.logInError = true;
-          this.user.logInErrorMessage = error.code + ": " + error.message;
-        });
-    } catch (error) {
-      this.user.email = "";
-      this.user.uid = null;
-
-      this.user.loggedIn = false;
-      this.user.logInError = true;
-      this.user.logInErrorMessage = JSON.stringify(error);
+  public logIn = (credentials: Credentials, isPersistant = false): void => {
+    this.logOut();
+    let persistence: Persistence = browserSessionPersistence;
+    if (isPersistant) {
+      persistence = browserLocalPersistence;
     }
+    setPersistence(this.auth, persistence)
+      .then(() => {
+        signInWithEmailAndPassword(
+          this.auth,
+          credentials.email,
+          credentials.password
+        )
+          .then(() => {
+            // do nothing
+          })
+          .catch((error) => {
+            this.user.email = "";
+            this.user.uid = null;
+
+            this.user.loggedIn = false;
+            this.user.logInError = true;
+            this.user.logInErrorMessage = error.code + ": " + error.message;
+          });
+      })
+      .catch((error) => {
+        this.user.email = "";
+        this.user.uid = null;
+
+        this.user.loggedIn = false;
+        this.user.logInError = true;
+        this.user.logInErrorMessage = error.code + ": " + error.message;
+      });
   };
 
   // Keeping this for reference on how to Type a Ref.
