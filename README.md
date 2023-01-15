@@ -153,17 +153,19 @@ After someoene has been added as a user they will need to "self register" to beg
 
 ### Collection permissions by role
 
-Each collection (including sub collections) will automatically have permissions keyed by role.  By default each collection and sub collection will receive the following permissions by role when created:
+Roles define what permissions the user willl have.  The system will use collection-data/-default- to lookup the permissions for an assigned role.  The default permissions can be changed or you can define role permissions based on specific collection paths.  If a specific collection path is not found when looking up a user's role permissions
 
 - **admin:** assign: true, write: true, read: true, delete: true
-- **user:** assign: false, write:false, read: false, delete: false
+- **editor**: assign: false, write: true, read: true, delete: true
+- **writer**: assign: false, write: true, read: true, delete: false
+- **user:** assign: false, write:false, read: true, delete: false
 
 How to change role permissions for a specific collection:
 
 ```javascript
 edgeFirebase.storeCollectionPermissions(
     "myItems/subitems/things",  // Collection path
-    "user", // must be user or admin
+    "user", // must be admin, editor, writer, user
     {
       assign: false,
       write: false,
@@ -207,7 +209,7 @@ Remove a role from a user for a collection:
 
 ### Root permissions and first user
 
-You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like a super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.
+You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like a super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.  The first time you login with your root user the collection-data/-default- role permissions document (mentioned above) will be automatically created.
 
 | ![root-collection-roles](./images/root-collection-roles.png) | ![root-user](./images/root-user.jpg) |
 | ------------------------------------------------------------ | ------------------------------------ |
@@ -254,7 +256,7 @@ edgeFirebase.removeUser("user@edgemarketingdesign.com");
 
 ### Users Snapshot Data
 
-This will create a reactive object (users) that contains the members of the collection and subcollections passed to the snapshot that the user running the function has assign access for, it will be a listed index by  email/user id.  Passing no collection will get all users that the user running has assign access for.
+This will create a reactive object (state.users) that contains the members of the collection passed to the snapshot if the user running the function has assign access for, it will be a listed index by  email/user id.  
 
 ```javascript
 edgeFirebase.startUsersSnapshot("myItems");
@@ -264,12 +266,11 @@ edgeFirebase.stopUsersSnapshot();
 
 ```vue
 <script setup>
-//users is a ref and needs to be accessed via "value"
- console.log(edgeFirebase.users.value);
+ console.log(edgeFirebase.state.users);
 </script>
 <template>
   <div>
-    <div v-for="user in edgeFirebase.users.value" :key="item">
+    <div v-for="user in edgeFirebase.state.users" :key="item">
       {{ user.email }}
     </div>
   </div>
@@ -297,7 +298,7 @@ interface user {
 ```typescript
 interface role {
   collectionPath: "-" | string; // - is root
-  role: "admin" | "user";
+  role: "admin" | "editor" | "writer" | "user";
 }
 ```
 
@@ -342,13 +343,12 @@ interface UserDataObject {
   meta: object;
   roles: role[]; //see role below
   specialPermissions: specialPermission[]; //see specialPermission below
-  canAssignCollectionPaths: string[]; //an array of collectionPaths that the user has "assign" access to
 }
 
 // sub types of UserDataObject:
 interface role {
   collectionPath: "-" | string; // - is root
-  role: "admin" | "user";
+  role: "admin" | "editor" | "writer" | "user";
 }
 
 interface specialPermission {
