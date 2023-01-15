@@ -582,12 +582,12 @@ staticSearch.getData("myItems", query, sort, limit);
 ```
 
 
-# Await and responses
+# Responses
 
-All functions can be used in conjunction with "await" and will return a response that can be used.  
+Most functions will return a response that can be used.  
 
 ```javascript
-const response = await edgeFirebase.startSnapshot("things");
+const response = edgeFirebase.startSnapshot("things");
 ```
 
 reponse:
@@ -596,6 +596,7 @@ reponse:
 interface actionResponse {
   success: boolean;
   message: string;
+  meta: {}
 }
 ```
 
