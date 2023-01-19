@@ -30,7 +30,9 @@ const config = {
     projectId: "your-projectId",
     storageBucket: "your-storageBucket",
     messagingSenderId: "your-messagingSenderId",
-    appId: "your-appId"
+    appId: "your-appId",
+    emulatorAuth: "",  // local emlulator port populated app will be started with auth emulator
+    emulatorFirestore: "", // local emlulator port populated app will be started with firestore emulator
   };
 const isPersistant = true // If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
 const edgeFirebase = new EdgeFirebase(config, isPersistant);
@@ -58,7 +60,9 @@ app.use(eFb, {
     projectId: "your-projectId",
     storageBucket: "your-storageBucket",
     messagingSenderId: "your-messagingSenderId",
-    appId: "your-appId"
+    appId: "your-appId",
+    emulatorAuth: "",  // local emlulator port populated app will be started with auth emulator
+    emulatorFirestore: "", // local emlulator port populated app will be started with firestore emulator
   }, isPersistant)
 //end edgeFirebase
 
@@ -79,7 +83,9 @@ export default defineNuxtPlugin((nuxtApp) => {
     projectId: "your-projectId",
     storageBucket: "your-storageBucket",
     messagingSenderId: "your-messagingSenderId",
-    appId: "your-appId"
+    appId: "your-appId",
+    emulatorAuth: "",  // local emlulator port populated app will be started with auth emulator
+    emulatorFirestore: "", // local emlulator port populated app will be started with firestore emulator
   }, isPersistant);
 });
 ```

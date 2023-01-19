@@ -24,6 +24,7 @@ import {
   deleteField,
   arrayRemove,
   arrayUnion,
+  connectFirestoreEmulator,
 } from "firebase/firestore";
 
 import {
@@ -39,7 +40,8 @@ import {
   reauthenticateWithCredential,
   EmailAuthProvider,
   sendPasswordResetEmail,
-  confirmPasswordReset
+  confirmPasswordReset,
+  connectAuthEmulator,
 } from "firebase/auth";
 
 interface FirestoreQuery {
@@ -102,19 +104,7 @@ interface newUser {
   meta: object;
 }
 
-interface user {
-  email: string;
-  roles: role[];
-  specialPermissions: specialPermission[];
-  userId: string;
-  docId: string;
-  uid: string;
-  last_updated: Date;
-}
 
-interface usersByEmail {
-  [email: string]: [user];
-}
 interface userMeta extends newUser {
   docId: string;
   userId: string;
@@ -143,6 +133,8 @@ interface firebaseConfig {
   storageBucket: string;
   messagingSenderId: string;
   appId: string;
+  emulatorAuth?: string;
+  emulatorFirestore?: string;
 }
 
 interface actionResponse {
@@ -164,7 +156,9 @@ export const EdgeFirebase = class {
       projectId: "",
       storageBucket: "",
       messagingSenderId: "",
-      appId: ""
+      appId: "",
+      emulatorAuth: "",
+      emulatorFirestore: ""
     },
     isPersistant: false
   ) {
@@ -174,8 +168,17 @@ export const EdgeFirebase = class {
     if (isPersistant) {
       persistence = browserLocalPersistence;
     }
+
     this.auth = initializeAuth(this.app, { persistence });
+    if (this.firebaseConfig.emulatorAuth) {
+      connectAuthEmulator(this.auth, `http://localhost:${this.firebaseConfig.emulatorAuth}`)
+    }
+
     this.db = getFirestore(this.app);
+    if (this.firebaseConfig.emulatorFirestore) {
+      connectFirestoreEmulator(this.db, "localhost", this.firebaseConfig.emulatorFirestore)
+    }
+
     this.setOnAuthStateChanged();
   }
 
@@ -317,6 +320,8 @@ export const EdgeFirebase = class {
     });
     this.unsubscibe['collection-data'] = unsubscribe
   }
+
+
 
   private startUserMetaSync = async (): Promise<void> => {
     await this.startCollectionPermissionsSync()
@@ -1084,8 +1089,6 @@ export const EdgeFirebase = class {
 
   public startUsersSnapshot = (collectionPath = ''): void => {
     this.stopSnapshot('users')
-    // TODO: need to build users object appropriately and only show roles
-    // and special permmisions for collectionPaths the user has assign access for
     this.state.users = {};
     if (collectionPath) {
       if (this.permissionCheck('assign', collectionPath)) {
