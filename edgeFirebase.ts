@@ -1,5 +1,6 @@
+// TODO:  add to documenation, rules... and tiggers for registeration, invited-users, and scheduled export (backup).
 import { initializeApp } from "firebase/app";
-import { reactive, computed } from "vue";
+import { reactive } from "vue";
 import {
   getFirestore,
   collection,
@@ -1260,7 +1261,7 @@ export const EdgeFirebase = class {
     permissions: permissions
   ): Promise<actionResponse> => {
     const canAssign = this.permissionCheck("assign", collectionPath);
-    // TODO: check if collectionPath starts with "users" and deny if so
+    // TODO: check if collectionPath starts with "users", "collection-data", "invited-users" and deny if so
     if (canAssign) {
       if (role === "admin" || role === "editor" || role === "writer" || role === "user") {
         const currentTime = new Date().getTime();
