@@ -745,64 +745,9 @@ export const EdgeFirebase = class {
 
   // Simple Store Items (add matching key per firebase collection)
   public data: CollectionDataObject = reactive({});
-  private usersByCollections: CollectionDataObject = reactive({});
-
-  public users = computed(() => {
-    const userList = {};
-    const keys = Object.keys(JSON.parse(JSON.stringify(this.usersByCollections)));
-    keys.forEach(key => {
-      const users = this.usersByCollections[key];
-      if (key.startsWith("ROLES|")) {
-        const collectionPathCheck = key.replace("ROLES|", "")
-        const userKeys = Object.keys(users);
-        if (Object.keys(users).length > 0) {
-          userKeys.forEach(userKey => {
-            const user = users[userKey];
-            if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-              userList[user.email] = {
-                docId: user.docId,
-                email: user.email,
-                roles: [{collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }],
-                specialPermissions: [],
-                meta: user.meta,
-                last_updated: user.last_updated,
-                userId: user.userId,
-                uid: user.uid
-              }
-            } else {
-              userList[user.email].roles.push({ collectionPath: collectionPathCheck, role: user.roles[collectionPathCheck].role }) 
-            }
-          });
-        }
-      }
-      if (key.startsWith("SPECIALPERMISSIONS|")) {
-        const collectionPathCheck = key.replace("SPECIALPERMISSIONS|", "")
-        const userKeys = Object.keys(users);
-        if (Object.keys(users).length > 0) {
-          userKeys.forEach(userKey => {
-            const user = users[userKey];
-            if (!Object.prototype.hasOwnProperty.call(userList, user.docId)) {
-              userList[user.email] = {
-                docId: user.docId,
-                email: user.email,
-                roles: [],
-                specialPermissions: [{ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }],
-                meta: user.meta,
-                last_updated: user.last_updated,
-                userId: user.userId,
-                uid: user.uid
-              }
-            } else {
-              userList[user.email].specialPermissions.push({ collectionPath: collectionPathCheck, permissions: user.specialPermissions[collectionPathCheck].permissions }) 
-            }
-          });
-        }
-      }
-    });
-    return userList;
-  });
 
   public unsubscibe: CollectionUnsubscribeObject = reactive({});
+  
   public user: UserDataObject = reactive({
     uid: null,
     email: "",
