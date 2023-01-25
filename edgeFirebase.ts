@@ -1,4 +1,3 @@
-// TODO:  add to documenation, rules... and tiggers for registeration, invited-users, and scheduled export (backup).
 import { initializeApp } from "firebase/app";
 import { reactive } from "vue";
 import {
@@ -89,7 +88,6 @@ interface specialPermission {
 
 interface UserDataObject {
   uid: string | null;
-  email: string;
   loggedIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
@@ -99,10 +97,11 @@ interface UserDataObject {
 }
 
 interface newUser {
-  email: string;
   roles: role[];
   specialPermissions: specialPermission[];
   meta: object;
+  isTemplate?: boolean;
+  subCreate?: {rootPath: string, role: string};
 }
 
 
@@ -115,6 +114,7 @@ interface userRegister {
   email: string;
   password: string;
   meta: object;
+  registrationCode: string;
 }
 
 interface Credentials {
@@ -190,12 +190,10 @@ export const EdgeFirebase = class {
   public db = null;
 
   private initUserMetaPermissions = async (): Promise<void> => {
-    updateDoc(doc(this.db, "users", this.user.email), {
-      userId: this.user.uid
-    });
     this.user.meta = {};
-    const docRef = doc(this.db, "users", this.user.email);
+    const docRef = doc(this.db, "users", this.user.uid);
     const docSnap = await getDoc(docRef);
+    console.log('data')
     if (docSnap) {
       this.user.meta = docSnap.data().meta;
       const roles: role[] = [];
@@ -221,43 +219,34 @@ export const EdgeFirebase = class {
       }
       this.user.specialPermissions = specialPermissions;
     }
+    console.log(this.user)
     this.stopSnapshot('userMeta')
     const metaUnsubscribe = onSnapshot(
-      doc(this.db, "users", this.user.email),
+      doc(this.db, "users", this.user.uid),
       (doc) => {
-        if (!doc.exists()) {
-          this.setUser({
-            email: this.user.email,
-            roles: [],
-            specialPermissions: [],
-            meta: {},
-          });
-          this.user.meta = {};
-        } else {
-          this.user.meta = doc.data().meta;
-          const roles: role[] = [];
-          if (doc.data().roles) {
-            for (const collectionPath in doc.data().roles) {
-              roles.push({
-                collectionPath,
-                role: doc.data().roles[collectionPath].role
-              });
-            }
+        this.user.meta = doc.data().meta;
+        const roles: role[] = [];
+        if (doc.data().roles) {
+          for (const collectionPath in doc.data().roles) {
+            roles.push({
+              collectionPath,
+              role: doc.data().roles[collectionPath].role
+            });
           }
-          this.user.roles = roles;
-
-          const specialPermissions: specialPermission[] = [];
-          if (doc.data().specialPermissions) {
-            for (const collectionPath in doc.data().specialPermissions) {
-              specialPermissions.push({
-                collectionPath,
-                permissions:
-                  doc.data().specialPermissions[collectionPath].permissions
-              });
-            }
-          }
-          this.user.specialPermissions = specialPermissions;
         }
+        this.user.roles = roles;
+
+        const specialPermissions: specialPermission[] = [];
+        if (doc.data().specialPermissions) {
+          for (const collectionPath in doc.data().specialPermissions) {
+            specialPermissions.push({
+              collectionPath,
+              permissions:
+                doc.data().specialPermissions[collectionPath].permissions
+            });
+          }
+        }
+        this.user.specialPermissions = specialPermissions;
       }
     );
     this.unsubscibe.userMeta = metaUnsubscribe;
@@ -347,11 +336,18 @@ export const EdgeFirebase = class {
       }
     });
   };
-
+  //TODO: document registraiton code 
   public registerUser = async (
     userRegister: userRegister
   ): Promise<actionResponse> => {
-    const userRef = doc(this.db, "users", userRegister.email);
+    if (!Object.prototype.hasOwnProperty.call(userRegister, 'registrationCode') || userRegister.registrationCode === "") {
+      return this.sendResponse({
+        success: false,
+        message: "Registration code is required.",
+        meta: {}
+      });
+    }
+    const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
     const userSnap = await getDoc(userRef);
     if (userSnap.exists()) {
       const user = userSnap.data();
@@ -362,29 +358,41 @@ export const EdgeFirebase = class {
           meta: {}
         });
       } else {
-        createUserWithEmailAndPassword(
+        // need really check auth to make sure user isn't registered.
+        // TODO: check if user is already registered, if so return error
+// ___________----------_> TODO: check on delay registering because of update trigger
+
+        const response = await createUserWithEmailAndPassword(
           this.auth,
           userRegister.email,
           userRegister.password
-        ).then(() => {
-          const metaUpdate = {};
+        );
+
+        console.log(response);
+        const metaUpdate = {};
+        if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
           for (const [key, value] of Object.entries(userRegister.meta)) {
             metaUpdate["meta." + key] = value;
           }
-          if (Object.keys(metaUpdate).length > 0) {
-            updateDoc(doc(this.db, "users", this.user.email), metaUpdate);
-          }
-          return this.sendResponse({
-            success: true,
-            message: "",
-            meta: {}
-          });
+        }
+        const userData = {...metaUpdate, uid: response.user.uid, userId: response.user.uid}
+        console.log('update')
+        console.log(userData)
+        await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), userData);
+        console.log('update done')
+
+
+        return this.sendResponse({
+          success: true,
+          message: "",
+          meta: {}
         });
+       
       }
     } else {
       return this.sendResponse({
         success: false,
-        message: "User doesn't exist",
+        message: "Registration code not valid.",
         meta: {}
       });
     }
@@ -454,9 +462,11 @@ export const EdgeFirebase = class {
     }
   };
 
-  setUserMeta = async (meta: unknown): Promise<actionResponse> => {
+  public setUserMeta = async (meta: unknown): Promise<actionResponse> => {
+    //TODO: check if current user id is the same as user being updated if not...
+    // swtich to collection staged-users... also need a permission check here.
     for (const [key, value] of Object.entries(meta)) {
-      await updateDoc(doc(this.db, "users/" + this.user.email), {
+      await updateDoc(doc(this.db, "users/" + this.user.uid), {
         ["meta." + key]: value
       });
     }
@@ -467,9 +477,9 @@ export const EdgeFirebase = class {
     });
   };
 
-  public removeUser = async (email: string): Promise<actionResponse> => {
+  public removeUser = async (docId: string): Promise<actionResponse> => {
     const removedFrom = [];
-    const userRef = doc(this.db, "users", email);
+    const userRef = doc(this.db, "users", docId);
     const userSnap = await getDoc(userRef);
     if (userSnap.data().roles) {
       for (const collectionPath in userSnap.data().roles) {
@@ -491,7 +501,7 @@ export const EdgeFirebase = class {
         );
         if (canAssign) {
           this.removeUserSpecialPermissions(
-            email,
+            docId,
             collectionPath.replaceAll("-", "/")
           );
           removedFrom.push(collectionPath.replaceAll("-", "/"));
@@ -512,8 +522,10 @@ export const EdgeFirebase = class {
       });
     }
   };
-
-  public setUser = async (newUser: newUser): Promise<actionResponse> => {
+  
+  //TODO: Change documentation "addUser"... this only use to create a new user...
+  //not to update anything.
+  public addUser = async (newUser: newUser): Promise<actionResponse> => {
     const canAssignRole = this.multiPermissionCheck(
       "assign",
       newUser.roles
@@ -523,30 +535,12 @@ export const EdgeFirebase = class {
       newUser.specialPermissions
     );
     if (canAssignRole.canDo && canAssignSpecialPermissions.canDo) {
-      const userRef = doc(this.db, "users", newUser.email);
-      const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) {
-        const userMeta: userMeta = {
-          docId: newUser.email,
-          userId: "",
-          email: newUser.email,
-          roles: newUser.roles,
-          specialPermissions: newUser.specialPermissions,
-          meta: newUser.meta
-        };
-        await this.generateUserMeta(userMeta);
-        return this.sendResponse({
-          success: true,
-          message: "",
-          meta: {}
-        });
-      } else {
-        return this.sendResponse({
-          success: false,
-          message: "User already exists",
-          meta: {}
-        });
-      }
+      await this.generateUserMeta(newUser);
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {}
+      });
     } else {
       return this.sendResponse({
         success: false,
@@ -593,7 +587,7 @@ export const EdgeFirebase = class {
     return response;
   };
 
-  private permissionCheck = (
+  public permissionCheck = (
     action: action,
     collectionPath: string
   ): boolean => {
@@ -679,22 +673,21 @@ export const EdgeFirebase = class {
     delete userMeta.roles;
     delete userMeta.specialPermissions;
 
-    const docRef = doc(this.db, "users", userMeta.docId);
-    const docSnap = await getDoc(docRef);
-    const docData = docSnap.data();
+    const onlyMeta = {meta: userMeta.meta, userId:  "", uid: this.user.uid};
+    //TODO: check this permission... seems should be checking "assign" on users
     const canWrite = this.permissionCheck("write", "users");
-    if (!docData || canWrite) {
-      await setDoc(doc(this.db, "users", userMeta.docId), userMeta);
-    }
-    for (const role of roles) {
-      await this.storeUserRoles(userMeta.docId, role.collectionPath, role.role);
-    }
-    for (const specialPermission of specialPermissions) {
-      await this.storeUserSpecialPermissions(
-        userMeta.docId,
-        specialPermission.collectionPath,
-        specialPermission.permissions
-      );
+    if (canWrite) {
+      const docRef =  await addDoc(collection(this.db, "staged-users"), onlyMeta );
+      for (const role of roles) {
+        await this.storeUserRoles(docRef.id, role.collectionPath, role.role);
+      }
+      for (const specialPermission of specialPermissions) {
+        await this.storeUserSpecialPermissions(
+          docRef.id,
+          specialPermission.collectionPath,
+          specialPermission.permissions
+        );
+      }
     }
   };
 
@@ -763,6 +756,8 @@ export const EdgeFirebase = class {
   public state = reactive({
     collectionPermissions: {},
     users: {},
+    registrationCode: "",
+    registrationMeta: {},
   });
 
   public getDocData = async (
@@ -1039,7 +1034,7 @@ export const EdgeFirebase = class {
     if (collectionPath) {
       if (this.permissionCheck('assign', collectionPath)) {
         const q = query(
-          collection(this.db, "users"),
+          collection(this.db, "staged-users"),
           where(
             "collectionPaths",
             "array-contains",
@@ -1050,6 +1045,7 @@ export const EdgeFirebase = class {
           const items = {};
           querySnapshot.forEach((doc) => {
             const user = doc.data();
+            const docId = doc.id;
             const newRoles = [];
             const newSpecialPermissions = [];
 
@@ -1070,7 +1066,7 @@ export const EdgeFirebase = class {
               });
             }
             const item = {
-              docId: user.docId,
+              docId,
               email: user.email,
               roles: newRoles,
               specialPermissions: newSpecialPermissions,
@@ -1089,15 +1085,15 @@ export const EdgeFirebase = class {
   };
 
   public removeUserRoles = async (
-    email: string,
+    docId: string,
     collectionPath: string
   ): Promise<actionResponse> => {
     const canAssign = this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      await updateDoc(doc(this.db, "users/" + email), {
+      await updateDoc(doc(this.db, "users/" + docId), {
         ["roles." + collectionPath.replaceAll("/", "-")]: deleteField()
       });
-      await updateDoc(doc(this.db, "users/" + email), {
+      await updateDoc(doc(this.db, "users/" + docId), {
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-"))
       });
       return this.sendResponse({
@@ -1116,16 +1112,16 @@ export const EdgeFirebase = class {
   };
 
   public removeUserSpecialPermissions = async (
-    email: string,
+    docId: string,
     collectionPath: string
   ): Promise<actionResponse> => {
     const canAssign = this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      await updateDoc(doc(this.db, "users/" + email), {
+      await updateDoc(doc(this.db, "users/" + docId), {
         ["specialPermissions." + collectionPath.replaceAll("/", "-")]:
           deleteField()
       });
-      await updateDoc(doc(this.db, "users/" + email), {
+      await updateDoc(doc(this.db, "users/" + docId), {
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-"))
       });
       return this.sendResponse({
@@ -1144,7 +1140,7 @@ export const EdgeFirebase = class {
   };
 
   public storeUserSpecialPermissions = async (
-    email: string,
+    docId: string,
     collectionPath: string,
     permissions: permissions
   ): Promise<actionResponse> => {
@@ -1156,11 +1152,13 @@ export const EdgeFirebase = class {
           ["specialPermissions." + collectionPath.replaceAll("/", "-")]: {
             collectionPath: collectionPath.replaceAll("/", "-"),
             permissions
-          }
+          },
+          uid: this.user.uid
         };
-        await updateDoc(doc(this.db, "users/" + email), permissionItem);
-        await updateDoc(doc(this.db, "users/" + email), {
-          collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-"))
+        await updateDoc(doc(this.db, "staged-users/" + docId), permissionItem);
+        await updateDoc(doc(this.db, "staged-users/" + docId), {
+          collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-")),
+          uid: this.user.uid
         });
         return this.sendResponse({
           success: true,
@@ -1185,7 +1183,7 @@ export const EdgeFirebase = class {
   };
 
   private storeUserRoles = async (
-    email: string,
+    docId: string,
     collectionPath: string,
     role: "admin" | "editor" | "writer" | "user"
   ): Promise<actionResponse> => {
@@ -1199,13 +1197,14 @@ export const EdgeFirebase = class {
             ["roles." + collectionPath.replaceAll("/", "-")]: {
               collectionPath: collectionPath.replaceAll("/", "-"),
               role
-            }
+            },
+            uid: this.user.uid
           };
 
-          await updateDoc(doc(this.db, "users/" + email), roleItem);
-          await updateDoc(doc(this.db, "users/" + email), {
-            collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-"))
-          });
+          await updateDoc(doc(this.db, "staged-users/" + docId), roleItem);
+          await updateDoc(doc(this.db, "staged-users/" + docId), {
+            collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-")),
+            uid: this.user.uid } );
           return this.sendResponse({
             success: true,
             message: "",
@@ -1261,7 +1260,7 @@ export const EdgeFirebase = class {
     permissions: permissions
   ): Promise<actionResponse> => {
     const canAssign = this.permissionCheck("assign", collectionPath);
-    // TODO: check if collectionPath starts with "users", "collection-data", "invited-users" and deny if so
+    // TODO: check if collectionPath starts with "users", "collection-data", "staged-users" and deny if so
     if (canAssign) {
       if (role === "admin" || role === "editor" || role === "writer" || role === "user") {
         const currentTime = new Date().getTime();

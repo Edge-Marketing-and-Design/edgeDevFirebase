@@ -108,13 +108,16 @@ const edgeFirebase = inject("edgeFirebase");
 
 ### Adding a User
 
-Users must be added before they can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below.
+Users must be added before they can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below. 
+
+Adding a user creates a document for them in the collection "staged-users". The docId of this documment is the use registration code and must be passed when using "registerUser".
+
+To bypass adding users and allow "self registration".  You can add a user that is a "template" user.  By setting the field "template" = true. For a template you can also set a role for a dynamic collection name defined by the user on registration, by setting the field "subCreate", like this:  subCreate: {rootPath: "myItems", role: "admin"}.  Then when registering the user you can pass a "subCreatePath" variable, like this:  subCreatePath: "subThings".  This will automatically assign the user to the role specified.  In the above example the user would be register is an admin for for the collectionPath: myItems/subThings.
 
 How to add a user:
 
 ```javascript
-edgeFirebase.setUser({
-    email: "user@edgemarketingdesign.com",
+edgeFirebase.addUser({
     roles: [
       {
         collectionPath: "myItems/subitems/things",
@@ -128,6 +131,8 @@ edgeFirebase.setUser({
       }
     ],
     meta: { firstName: "John", lastName: "Doe", age: 28 } // This is just an example of meta, it can contain any fields and any number of fields.
+    template: true,  //Only true if setting up template for self registation
+    subCreate: { rootPath: "myItems", role: "admin" }
 });
 ```
 
@@ -145,6 +150,8 @@ After someoene has been added as a user they will need to "self register" to beg
       firstName: "John",
       lastName: "Doe"
     } // This is just an example of meta, it can contain any fields and any number of fields.
+    registrationCode: docId // This is the docId of either an added user or a template user, when using a template you can simply hardcode the registrationCode of the remplate to allow self registration.
+    subCreatePath: // See explaintion above about self registration and dynamic collectionPath for user roles.
   });
 ```
 
@@ -255,14 +262,14 @@ Remove user special permissions:
 The remove user function doesn't actually delete the user completely from the system but instead removes all roles and special permissions that the user running the function has assign access for.  In this way the user is "removed" as far as the "assigning user" is concerned but the user will remain a user for collections that the "assign user" doesn't have access to.  
 
 ```javascript
-edgeFirebase.removeUser("user@edgemarketingdesign.com");
+edgeFirebase.removeUser(docId);
 ```
 
 
 
 ### Users Snapshot Data
 
-This will create a reactive object (state.users) that contains the members of the collection passed to the snapshot if the user running the function has assign access for, it will be a listed index by  email/user id.  
+This will create a reactive object (state.users) that contains the members of the collection passed to the snapshot if the user running the function has assign access for, it will be a listed index by  docId.  
 
 ```javascript
 edgeFirebase.startUsersSnapshot("myItems");
@@ -277,27 +284,19 @@ edgeFirebase.stopUsersSnapshot();
 <template>
   <div>
     <div v-for="user in edgeFirebase.state.users" :key="item">
-      {{ user.email }}
+      {{ user.meta.name }}
     </div>
   </div>
 </template>
 ```
 
 ```typescript
-interface usersByEmail {
-  [email: string]: [user];
-}
-```
-
-```typescript
 interface user {
-  email: string;
+  docId: string;
   roles: role[];
   specialPermissions: specialPermission[];
   userId: string;
-  docId: string;
   uid: string;
-  last_updated: Date;
 }
 ```
 
