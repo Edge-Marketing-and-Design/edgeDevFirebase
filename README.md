@@ -205,7 +205,7 @@ How to assign a user a role for a collection:
 
 ```javascript
   edgeFirebase.storeUserRoles(
-    "user@edgemarketingdesign.com",
+    docId,  //Document ID of user in staged-users collection.
     "myItems/subitems/things",
     "admin"
   );
@@ -215,7 +215,7 @@ Remove a role from a user for a collection:
 
 ```javascript
   edgeFirebase.removeUserRoles(
-    "user@edgemarketingdesign.com",
+     docId,  //Document ID of user in staged-users collection.
     "myItems/subitems/things"
   );
 ```
@@ -235,7 +235,7 @@ If you want to give a user a unique set of permissions for a collection that doe
 
 ```javascript
   edgeFirebase.storeUserSpecialPermissions(
-    "user@edgemarketingdesign.com",
+     docId,  //Document ID of user in staged-users collection.
     "myItems/subitems/things",
     {
       assign: false,
@@ -250,7 +250,7 @@ Remove user special permissions:
 
 ```javascript
   edgeFirebase.removeUserSpecialPermissions(
-    "user@edgemarketingdesign.com",
+     docId,  //Document ID of user in staged-users collection.
     "myItems/subitems/things"
   );
 ```
