@@ -117,6 +117,8 @@ interface RuleCheck {
   permissionType: string;
   permissionCheckPath: string; 
   fullPath: string;
+  action: string;
+  uid: string;
 }
 interface Credentials {
   email: string;
@@ -485,7 +487,7 @@ export const EdgeFirebase = class {
     const userSnap = await getDoc(userRef);
     if (userSnap.data().roles) {
       for (const collectionPath in userSnap.data().roles) {
-        const canAssign = this.permissionCheck(
+        const canAssign = await this.permissionCheck(
           "assign",
           collectionPath.replaceAll("-", "/")
         );
@@ -497,7 +499,7 @@ export const EdgeFirebase = class {
     }
     if (userSnap.data().specialPermissions) {
       for (const collectionPath in userSnap.data().specialPermissions) {
-        const canAssign = this.permissionCheck(
+        const canAssign = await this.permissionCheck(
           "assign",
           collectionPath.replaceAll("-", "/")
         );
@@ -566,7 +568,7 @@ export const EdgeFirebase = class {
     //   canDo = false;
     // }
     for (const collection of collections) {
-      if (!(this.permissionCheck(action, collection.collectionPath))) {
+      if (!(this.permissionCheckOnly(action, collection.collectionPath))) {
         badCollectionPaths.push(collection.collectionPath);
         canDo = false;
       }
@@ -589,10 +591,10 @@ export const EdgeFirebase = class {
     return response;
   };
 
-  private getRuleCheckInfo = (collectionPath: string): RuleCheck => {
+  private setRuleHelper = async(collectionPath: string, action): Promise<void> => {
     const collection = collectionPath.replaceAll("-", "/").split("/");
     let index = collection.length;
-    const check = {permissionType: "", permissionCheckPath: "", fullPath: collectionPath};
+    const check: RuleCheck = {permissionType: "", permissionCheckPath: "", fullPath: collectionPath.replaceAll("/", "-"), action, uid: this.user.uid };
     while (index > 0) {
       const collectionArray = JSON.parse(JSON.stringify(collection));
       const permissionCheck = collectionArray.splice(0, index).join("-");
@@ -624,13 +626,10 @@ export const EdgeFirebase = class {
       check.permissionCheckPath = "-";
       check.permissionType = "specialPermissions";
     }
-    return check;
+    await setDoc(doc(this.db, "rule-helpers", this.user.uid), check);
   }
 
-  public permissionCheck = (
-    action: action,
-    collectionPath: string
-  ): boolean => {
+  private permissionCheckOnly = (action: action, collectionPath: string): boolean => {
     const collection = collectionPath.replaceAll("-", "/").split("/");
     let index = collection.length;
     let permissionData = {};
@@ -679,6 +678,17 @@ export const EdgeFirebase = class {
       }
     }
     return permissionData[action];
+  }
+
+  public permissionCheck = async(
+    action: action,
+    collectionPath: string,
+  ): Promise<boolean> => {
+    const check = this.permissionCheckOnly(action, collectionPath);
+    if (check) {
+      await this.setRuleHelper(collectionPath, action);
+    }
+    return check;
   };
 
   private getCollectionPermissions = (
@@ -1031,13 +1041,13 @@ export const EdgeFirebase = class {
     );
   };
 
-  public startSnapshot = (
+  public startSnapshot = async(
     collectionPath: string,
     queryList: FirestoreQuery[] = [],
     orderList: FirestoreOrderBy[] = [],
     max = 0
-  ): actionResponse => {
-    const canRead = this.permissionCheck("read", collectionPath);
+  ): Promise<actionResponse> => {
+    const canRead = await this.permissionCheck("read", collectionPath);
     this.data[collectionPath] = {};
     this.stopSnapshot(collectionPath);
     this.unsubscibe[collectionPath] = null;
@@ -1067,11 +1077,11 @@ export const EdgeFirebase = class {
     }
   };
 
-  public startUsersSnapshot = (collectionPath = ''): void => {
+  public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
     this.stopSnapshot('users')
     this.state.users = {};
     if (collectionPath) {
-      if (this.permissionCheck('assign', collectionPath)) {
+      if (await this.permissionCheck('assign', collectionPath)) {
         const q = query(
           collection(this.db, "staged-users"),
           where(
@@ -1090,19 +1100,21 @@ export const EdgeFirebase = class {
 
             if (user.roles) {
               const roles: role[] = Object.values(user.roles);
-              roles.forEach((role) => {
-                if (this.permissionCheck('assign', role.collectionPath)) {
+              for (const role of roles) {
+                if (this.permissionCheckOnly('assign', role.collectionPath)) {
+                  console.log(role)
+                  console.log('its true')
                   newRoles.push(role)
                 }
-              });
+              }
             }
             if (user.specialPermissions) {
               const permissions: specialPermission[] = Object.values(user.specialPermissions);
-              permissions.forEach(permission => {
-                if (this.permissionCheck('assign', permission.collectionPath)) {
+              for (const permission of permissions) {
+                if (this.permissionCheckOnly('assign', permission.collectionPath)) {
                   newSpecialPermissions.push(permission)
                 }
-              });
+              }
             }
             const item = {
               docId,
@@ -1127,14 +1139,13 @@ export const EdgeFirebase = class {
     docId: string,
     collectionPath: string
   ): Promise<actionResponse> => {
-    let canAssign = this.permissionCheck("assign", collectionPath);
+    let canAssign = await this.permissionCheck("assign", collectionPath);
     if (docId === this.user.stagedDocId) {
       // User can remove themselves from any role
       canAssign = true;
     }
     if (canAssign) {
       await updateDoc(doc(this.db, "staged-users/" + docId), {
-        ruleCheck: this.getRuleCheckInfo(collectionPath),
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-")),
         ["roles." + collectionPath.replaceAll("/", "-")]: deleteField()
       });
@@ -1157,14 +1168,13 @@ export const EdgeFirebase = class {
     docId: string,
     collectionPath: string
   ): Promise<actionResponse> => {
-    let canAssign = this.permissionCheck("assign", collectionPath);
+    let canAssign = await this.permissionCheck("assign", collectionPath);
     if (docId === this.user.stagedDocId) {
       // User can remove themselves from any special permission
       canAssign = true;
     }
     if (canAssign) {
       await updateDoc(doc(this.db, "staged-users/" + docId), {
-        ruleCheck: this.getRuleCheckInfo(collectionPath),
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-")),
         ["specialPermissions." + collectionPath.replaceAll("/", "-")]:
           deleteField()
@@ -1189,7 +1199,7 @@ export const EdgeFirebase = class {
     collectionPath: string,
     permissions: permissions
   ): Promise<actionResponse> => {
-    const canAssign = this.permissionCheck("assign", collectionPath);
+    const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
       const collectionExists = await this.collectionExists(collectionPath);
       if (collectionExists) {
@@ -1202,7 +1212,6 @@ export const EdgeFirebase = class {
         };
         await updateDoc(doc(this.db, "staged-users/" + docId), {
           ...permissionItem,
-          ruleCheck: this.getRuleCheckInfo(collectionPath),
           collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-")),
           uid: this.user.uid
         });
@@ -1233,7 +1242,7 @@ export const EdgeFirebase = class {
     collectionPath: string,
     role: "admin" | "editor" | "writer" | "user"
   ): Promise<actionResponse> => {
-    const canAssign = this.permissionCheck("assign", collectionPath);
+    const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
       if (role === "admin" || role === "user" || role === "editor" || role === "writer") {
         const collectionExists = await this.collectionExists(collectionPath);
@@ -1247,7 +1256,6 @@ export const EdgeFirebase = class {
           };
           await updateDoc(doc(this.db, "staged-users/" + docId), {
             ...roleItem,
-            ruleCheck: this.getRuleCheckInfo(collectionPath),
             collectionPaths: arrayUnion(collectionPath.replaceAll("/", "-")),
             uid: this.user.uid } );
           return this.sendResponse({
@@ -1282,9 +1290,8 @@ export const EdgeFirebase = class {
   public removeCollectionPermissions = async (
     collectionPath: string,
   ): Promise<actionResponse> => {
-    const canAssign = this.permissionCheck("assign", collectionPath);
+    const canAssign = await this.permissionCheck("assign", collectionPath);
     if (canAssign) {
-      // TODO need to implemnt ruleCheck: this.getRuleCheckInfo(collectionPath) and update rules
       await deleteDoc(doc(this.db, "collection-data", collectionPath.replaceAll("/", "-")));
       return this.sendResponse({
         success: true,
@@ -1305,10 +1312,9 @@ export const EdgeFirebase = class {
     role: "admin" | "editor" | "writer" | "user",
     permissions: permissions
   ): Promise<actionResponse> => {
-    const canAssign = this.permissionCheck("assign", collectionPath);
+    const canAssign = await this.permissionCheck("assign", collectionPath);
     // TODO: check if collectionPath starts with "users", "collection-data", "staged-users" and deny if so
     // TODO add above check to rules as well
-    // TODO also need to implemnt ruleCheck: this.getRuleCheckInfo(collectionPath) and update rules
     if (canAssign) {
       if (role === "admin" || role === "editor" || role === "writer" || role === "user") {
         const currentTime = new Date().getTime();
@@ -1361,7 +1367,7 @@ export const EdgeFirebase = class {
     collectionPath: string,
     item: object,
   ): Promise<actionResponse> => {
-    const canWrite = this.permissionCheck("write", collectionPath);
+    const canWrite = await this.permissionCheck("write", collectionPath);
     if (!canWrite) {
       return this.sendResponse({
         success: false,
@@ -1378,7 +1384,7 @@ export const EdgeFirebase = class {
       }
       if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
         const docId = cloneItem.docId;
-        const canRead = this.permissionCheck("read", collectionPath);
+        const canRead = await this.permissionCheck("read", collectionPath);
         if (canRead) {
           if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
             this.data[collectionPath][docId] = cloneItem;
@@ -1395,7 +1401,7 @@ export const EdgeFirebase = class {
           collection(this.db, collectionPath),
           cloneItem
         );
-        const canRead = this.permissionCheck("read", collectionPath);
+        const canRead = await this.permissionCheck("read", collectionPath);
         if (canRead) {
           if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
             this.data[collectionPath][docRef.id] = cloneItem;
@@ -1419,7 +1425,7 @@ export const EdgeFirebase = class {
     collectionPath: string,
     docId: string
   ): Promise<actionResponse> => {
-    const canDelete = this.permissionCheck("delete", collectionPath);
+    const canDelete = await this.permissionCheck("delete", collectionPath);
     if (canDelete) {
       if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
         if (
