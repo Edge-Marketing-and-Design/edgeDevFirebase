@@ -192,6 +192,8 @@ export const EdgeFirebase = class {
   }
 
   private firebaseConfig = null;
+  private newRegistration = null;
+  private newRegistrationStagedUser = null;
 
   public app = null;
   public auth = null;
@@ -336,7 +338,27 @@ export const EdgeFirebase = class {
         this.user.uid = userAuth.uid;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
-        this.startUserMetaSync();
+        if (this.newRegistration) {
+          let metaUpdate = {};
+          if (Object.prototype.hasOwnProperty.call(this.newRegistration, 'meta')) {
+            metaUpdate = this.newRegistration.meta;
+          }else{
+            metaUpdate = this.newRegistrationStagedUser.meta;
+          }
+      
+          const userData = {roles: this.newRegistrationStagedUser.roles, specialPermissions: this.newRegistrationStagedUser.specialPermissions, meta: metaUpdate, uid: this.user.uid, userId: this.user.uid, stagedDocId: this.newRegistration.registrationCode}
+          const initRoleHelper = {uid: this.user.uid}
+          initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
+          setDoc(doc(this.db, "rule-helpers", this.user.uid), initRoleHelper).then(() => {
+            setDoc(doc(this.db, "users/" + this.user.uid), userData).then(() => {
+              updateDoc(doc(this.db, "staged-users/" + this.newRegistration.registrationCode), {userId: this.user.uid, uid: this.user.uid}).then(() => {
+                this.startUserMetaSync();
+              });
+            });
+          });
+        } else {
+          this.startUserMetaSync();
+        }
       } else {
         this.user.email = "";
         this.user.uid = null;
@@ -371,26 +393,14 @@ export const EdgeFirebase = class {
         // TODO: check if user is already registered, if so return error with auth
         // TODO: check on delay registering because of update trigger perhaps temporarily running
         // of the staged-user when first registering
-
+        this.newRegistration = userRegister;
+        this.newRegistrationStagedUser = user;
         const response = await createUserWithEmailAndPassword(
           this.auth,
           userRegister.email,
           userRegister.password
         );
-
-        let metaUpdate = {};
-        if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
-          metaUpdate = userRegister.meta;
-        }else{
-          metaUpdate = user.meta;
-        }
-    
-        const userData = {roles: user.roles, specialPermissions: user.specialPermissions, meta: metaUpdate, uid: response.user.uid, userId: response.user.uid}
-        const initRoleHelper = {uid: response.user.uid}
-        initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
-        await setDoc(doc(this.db, "rule-helpers", response.user.uid), initRoleHelper);
-        await setDoc(doc(this.db, "users/" + response.user.uid), userData);
-        await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), {userId: response.user.uid, uid: response.user.uid});
+        
         return this.sendResponse({
           success: true,
           message: "",
