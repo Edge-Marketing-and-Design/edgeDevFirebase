@@ -1112,7 +1112,8 @@ export const EdgeFirebase = class {
     this.stopSnapshot('users')
     this.state.users = {};
     if (collectionPath) {
-      if (await this.permissionCheck('assign', collectionPath)) {
+      const canAssign = await this.permissionCheck('assign', collectionPath);
+      if (canAssign) {
         const q = query(
           collection(this.db, "staged-users"),
           where(
