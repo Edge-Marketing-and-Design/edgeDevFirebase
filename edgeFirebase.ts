@@ -345,13 +345,17 @@ export const EdgeFirebase = class {
           }else{
             metaUpdate = this.newRegistrationStagedUser.meta;
           }
-      
+
+          let stagedUserUpdate: {userId?: string, templateUserId?: string, uid: string} = {userId: this.user.uid, uid: this.user.uid}
+          if (this.newRegistrationStagedUser.isTemplate) {
+            stagedUserUpdate = {templateUserId: this.user.uid, uid: this.user.uid}
+          }
           const userData = {roles: this.newRegistrationStagedUser.roles, specialPermissions: this.newRegistrationStagedUser.specialPermissions, meta: metaUpdate, uid: this.user.uid, userId: this.user.uid, stagedDocId: this.newRegistration.registrationCode}
           const initRoleHelper = {uid: this.user.uid}
           initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
           setDoc(doc(this.db, "rule-helpers", this.user.uid), initRoleHelper).then(() => {
             setDoc(doc(this.db, "users/" + this.user.uid), userData).then(() => {
-              updateDoc(doc(this.db, "staged-users/" + this.newRegistration.registrationCode), {userId: this.user.uid, uid: this.user.uid}).then(() => {
+              updateDoc(doc(this.db, "staged-users/" + this.newRegistration.registrationCode), stagedUserUpdate).then(() => {
                 this.startUserMetaSync();
               });
             });
@@ -368,7 +372,7 @@ export const EdgeFirebase = class {
       }
     });
   };
-  //TODO: document registraiton code 
+  //TODO: Add to documentation update registraiton process
   public registerUser = async (
     userRegister: userRegister
   ): Promise<actionResponse> => {
@@ -391,8 +395,6 @@ export const EdgeFirebase = class {
         });
       } else {
         // TODO: check if user is already registered, if so return error with auth
-        // TODO: check on delay registering because of update trigger perhaps temporarily running
-        // of the staged-user when first registering
         this.newRegistration = userRegister;
         this.newRegistrationStagedUser = user;
         const response = await createUserWithEmailAndPassword(
@@ -482,8 +484,8 @@ export const EdgeFirebase = class {
   };
 
   public setUserMeta = async (meta: unknown): Promise<actionResponse> => {
-    //TODO: check if current user id is the same as user being updated if not...
-    // swtich to collection staged-users... also need a permission check here.
+    //TODO: Change setUserMeta to also be used by someone with assign permissions and 
+    // add a permissionCheck here for it.
     for (const [key, value] of Object.entries(meta)) {
       await updateDoc(doc(this.db, "staged-users/" + this.user.stagedDocId), {
         ["meta." + key]: value, uid: this.user.uid
@@ -744,7 +746,17 @@ export const EdgeFirebase = class {
     delete userMeta.roles;
     delete userMeta.specialPermissions;
 
-    const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{} };
+    let isTemplate = false
+    if (Object.prototype.hasOwnProperty.call(userMeta, "isTemplate") && userMeta.isTemplate) {
+      isTemplate = true
+    }
+
+    let subCreate = {}
+    if (Object.prototype.hasOwnProperty.call(userMeta, "subCreate")) {
+      subCreate = userMeta.subCreate
+    }
+
+    const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{}, isTemplate, subCreate };
 
     const docRef =  await addDoc(collection(this.db, "staged-users"), onlyMeta );
     for (const role of roles) {
@@ -760,23 +772,19 @@ export const EdgeFirebase = class {
     
   };
 
-  // Composable to logout
   public logOut = (): void => {
-    signOut(this.auth)
-      .then(() => {
-        Object.keys(this.unsubscibe).forEach((key) => {
-          if (this.unsubscibe[key] instanceof Function) {
-            this.unsubscibe[key]();
-            this.unsubscibe[key] = null;
-          }
-        });
-      })
-      .catch(() => {
-        // Do nothing
-      });
+    Object.keys(this.unsubscibe).forEach((key) => {
+      if (this.unsubscibe[key] instanceof Function) {
+        this.unsubscibe[key]();
+        this.unsubscibe[key] = null;
+      }
+    });
+    signOut(this.auth).then(() => {
+      this.newRegistration = null;
+      this.newRegistrationStagedUser = null;
+    })
   };
 
-  // Composable to login and set persistence
   public logIn = (credentials: Credentials): void => {
     this.logOut();
     signInWithEmailAndPassword(
@@ -1153,6 +1161,8 @@ export const EdgeFirebase = class {
               specialPermissions: newSpecialPermissions,
               meta: user.meta,
               last_updated: user.last_updated,
+              isTemplate: user.isTemplate,
+              subCreate: user.subCreate,
               userId: user.userId,
               uid: user.uid
             }
