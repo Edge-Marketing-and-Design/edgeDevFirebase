@@ -103,7 +103,14 @@ interface newUser {
   specialPermissions: specialPermission[];
   meta: object;
   isTemplate?: boolean;
-  subCreate?: {rootPath: string, role: string};
+  subCreate?: {
+    rootPath: string, // This must be a collection path (odd number of segments) since a document will be created and assigned to ther user here.
+    role: string,
+    dynamicDocumentField: string, // This is the field in the document that will be set by the value of "dynamicDocumentFieldValue" passed during registration, like "name"
+    documentStructure: {
+      [key: string]: any
+    }
+  };
 }
 
 interface userRegister {
@@ -111,6 +118,7 @@ interface userRegister {
   password: string;
   meta: object;
   registrationCode: string;
+  dynamicDocumentFieldValue?: string;
 }
 
 
@@ -192,20 +200,14 @@ export const EdgeFirebase = class {
   }
 
   private firebaseConfig = null;
-  private newRegistration = null;
-  private newRegistrationStagedUser = null;
 
   public app = null;
   public auth = null;
   public db = null;
 
-  private initUserMetaPermissions = async (): Promise<void> => {
+  private initUserMetaPermissions = async (docSnap): Promise<void> => {
     this.user.meta = {};
-    const docRef = doc(this.db, "users", this.user.uid);
-    const docSnap = await getDoc(docRef);
-    console.log('data')
-    console.log(docSnap.data())
-    if (docSnap) {
+    if (docSnap.exists()) {
       this.user.meta = docSnap.data().meta;
       const roles: role[] = [];
       if (docSnap.data().roles) {
@@ -231,7 +233,6 @@ export const EdgeFirebase = class {
       this.user.specialPermissions = specialPermissions;
       this.user.stagedDocId = docSnap.data().stagedDocId;
     }
-    console.log(this.user)
     this.stopSnapshot('userMeta')
     const metaUnsubscribe = onSnapshot(
       doc(this.db, "users", this.user.uid),
@@ -325,11 +326,24 @@ export const EdgeFirebase = class {
 
 
 
-  private startUserMetaSync = async (): Promise<void> => {
+  private startUserMetaSync = async (docSnap): Promise<void> => {
     await this.startCollectionPermissionsSync()
-    await this.initUserMetaPermissions();
+    await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
   };
+
+  private waitForUser = async(): Promise<void> => {
+    //On registration may take a second for user to be created
+    const docRef = doc(this.db, "users", this.user.uid);
+    const docSnap = await getDoc(docRef);
+    if (docSnap.exists()) {
+      this.startUserMetaSync(docSnap);
+    } else {
+      setTimeout(() => {
+          this.waitForUser();
+      }, 1000);
+    }
+  }
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
@@ -338,31 +352,7 @@ export const EdgeFirebase = class {
         this.user.uid = userAuth.uid;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
-        if (this.newRegistration) {
-          let metaUpdate = {};
-          if (Object.prototype.hasOwnProperty.call(this.newRegistration, 'meta')) {
-            metaUpdate = this.newRegistration.meta;
-          }else{
-            metaUpdate = this.newRegistrationStagedUser.meta;
-          }
-
-          let stagedUserUpdate: {userId?: string, templateUserId?: string, uid: string} = {userId: this.user.uid, uid: this.user.uid}
-          if (this.newRegistrationStagedUser.isTemplate) {
-            stagedUserUpdate = {templateUserId: this.user.uid, uid: this.user.uid}
-          }
-          const userData = {roles: this.newRegistrationStagedUser.roles, specialPermissions: this.newRegistrationStagedUser.specialPermissions, meta: metaUpdate, uid: this.user.uid, userId: this.user.uid, stagedDocId: this.newRegistration.registrationCode}
-          const initRoleHelper = {uid: this.user.uid}
-          initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
-          setDoc(doc(this.db, "rule-helpers", this.user.uid), initRoleHelper).then(() => {
-            setDoc(doc(this.db, "users/" + this.user.uid), userData).then(() => {
-              updateDoc(doc(this.db, "staged-users/" + this.newRegistration.registrationCode), stagedUserUpdate).then(() => {
-                this.startUserMetaSync();
-              });
-            });
-          });
-        } else {
-          this.startUserMetaSync();
-        }
+        this.waitForUser();
       } else {
         this.user.email = "";
         this.user.uid = null;
@@ -372,7 +362,6 @@ export const EdgeFirebase = class {
       }
     });
   };
-  //TODO: Add to documentation update registraiton process
   public registerUser = async (
     userRegister: userRegister
   ): Promise<actionResponse> => {
@@ -394,14 +383,40 @@ export const EdgeFirebase = class {
           meta: {}
         });
       } else {
+        if (user.isTemplate  && Object.prototype.hasOwnProperty.call("subCreate", user) &&  Object.values(user.subCreate).length > 0) {
+          if (!Object.prototype.hasOwnProperty.call(userRegister, 'dynamicDocumentFieldValue') || userRegister.dynamicDocumentFieldValue === "") {
+            return this.sendResponse({
+              success: false,
+              message: "Dynamic document field value is required for registration when template user has subCreate.",
+              meta: {}
+            });
+         }
+        }
         // TODO: check if user is already registered, if so return error with auth
-        this.newRegistration = userRegister;
-        this.newRegistrationStagedUser = user;
         const response = await createUserWithEmailAndPassword(
           this.auth,
           userRegister.email,
           userRegister.password
         );
+
+        let metaUpdate = {};
+        if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
+          metaUpdate = userRegister.meta;
+        }else{
+          metaUpdate = user.meta;
+        }
+
+        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
+        if (user.isTemplate) {
+          stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, meta: user.meta, templateMeta: metaUpdate}
+          if (Object.prototype.hasOwnProperty.call(userRegister, 'dynamicDocumentFieldValue')) {
+            stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate}
+          }
+        }
+        const initRoleHelper = {uid: response.user.uid}
+        initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
+        await setDoc(doc(this.db, "rule-helpers", response.user.uid), initRoleHelper);
+        await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), stagedUserUpdate)
         
         return this.sendResponse({
           success: true,
@@ -544,8 +559,6 @@ export const EdgeFirebase = class {
     }
   };
   
-  //TODO: Change documentation "addUser"... this only use to create a new user...
-  //not to update anything.
   public addUser = async (newUser: newUser): Promise<actionResponse> => {
     const canAssignRole = this.multiPermissionCheck(
       "assign",
@@ -556,12 +569,8 @@ export const EdgeFirebase = class {
       newUser.specialPermissions
     );
     if (canAssignRole.canDo && canAssignSpecialPermissions.canDo) {
-      await this.generateUserMeta(newUser);
-      return this.sendResponse({
-        success: true,
-        message: "",
-        meta: {}
-      });
+      const response = await this.generateUserMeta(newUser);
+      return this.sendResponse(response);
     } else {
       return this.sendResponse({
         success: false,
@@ -740,7 +749,7 @@ export const EdgeFirebase = class {
     };
   };
 
-  private generateUserMeta = async (userMeta: newUser): Promise<void> => {
+  private generateUserMeta = async (userMeta: newUser): Promise<actionResponse> => {
     const roles: role[] = userMeta.roles;
     const specialPermissions: specialPermission[] = userMeta.specialPermissions;
     delete userMeta.roles;
@@ -753,7 +762,23 @@ export const EdgeFirebase = class {
 
     let subCreate = {}
     if (Object.prototype.hasOwnProperty.call(userMeta, "subCreate")) {
-      subCreate = userMeta.subCreate
+      if (userMeta.subCreate.rootPath.split("-").length % 2==0){
+        return {
+          success: false,
+          message: "subCreate.rootPath must contain an odd number of segments.",
+          meta: {}
+        }
+     }
+      const canAssign = await this.permissionCheck("assign", userMeta.subCreate.rootPath)
+      if (canAssign) {
+         subCreate = userMeta.subCreate
+      } else {
+        return {
+          success: false,
+          message: "You do not have assign permission to '" + userMeta.subCreate.rootPath + "'",
+          meta: {}
+        }
+      }
     }
 
     const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{}, isTemplate, subCreate };
@@ -769,19 +794,30 @@ export const EdgeFirebase = class {
         specialPermission.permissions
       );
     }
-    
+    return {
+      success: true,
+      message: "",
+      meta: {}
+    }
   };
 
   public logOut = (): void => {
-    Object.keys(this.unsubscibe).forEach((key) => {
+    for (const key of Object.keys(this.unsubscibe)) {
       if (this.unsubscibe[key] instanceof Function) {
         this.unsubscibe[key]();
         this.unsubscibe[key] = null;
       }
-    });
+    }
     signOut(this.auth).then(() => {
-      this.newRegistration = null;
-      this.newRegistrationStagedUser = null;
+      this.user.uid = null;
+      this.user.email = "";
+      this.user.loggedIn = false;
+      this.user.logInError = false;
+      this.user.logInErrorMessage = "";
+      this.user.meta = {};
+      this.user.roles = [];
+      this.user.specialPermissions = [];
+      this.user.stagedDocId = null;
     })
   };
 
@@ -1116,63 +1152,69 @@ export const EdgeFirebase = class {
     }
   };
 
-  public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
-    this.stopSnapshot('users')
-    this.state.users = {};
-    if (collectionPath) {
-      const canAssign = await this.permissionCheck('assign', collectionPath);
-      if (canAssign) {
-        const q = query(
-          collection(this.db, "staged-users"),
-          where(
-            "collectionPaths",
-            "array-contains",
-            collectionPath.replaceAll('/', '-')
-          )
-        )
-        const unsubscibe = onSnapshot(q, (querySnapshot) => {
-          const items = {};
-          querySnapshot.forEach((doc) => {
-            const user = doc.data();
-            const docId = doc.id;
-            const newRoles = [];
-            const newSpecialPermissions = [];
+  private usersSnapshotStarting = false;
 
-            if (user.roles) {
-              const roles: role[] = Object.values(user.roles);
-              for (const role of roles) {
-                if (this.permissionCheckOnly('assign', role.collectionPath)) {
-                  newRoles.push(role)
+  public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
+    if (!this.usersSnapshotStarting) {
+      this.usersSnapshotStarting = true;
+      this.stopSnapshot("staged-users");
+      this.state.users = {};
+      if (collectionPath) {
+        const canAssign = await this.permissionCheck('assign', collectionPath);
+        if (canAssign) {
+          const q = query(
+            collection(this.db, "staged-users"),
+            where(
+              "collectionPaths",
+              "array-contains",
+              collectionPath.replaceAll('/', '-')
+            )
+          )
+          const unsubscibe = await onSnapshot(q, (querySnapshot) => {
+            const items = {};
+            querySnapshot.forEach((doc) => {
+              const user = doc.data();
+              const docId = doc.id;
+              const newRoles = [];
+              const newSpecialPermissions = [];
+
+              if (user.roles) {
+                const roles: role[] = Object.values(user.roles);
+                for (const role of roles) {
+                  if (this.permissionCheckOnly('assign', role.collectionPath)) {
+                    newRoles.push(role)
+                  }
                 }
               }
-            }
-            if (user.specialPermissions) {
-              const permissions: specialPermission[] = Object.values(user.specialPermissions);
-              for (const permission of permissions) {
-                if (this.permissionCheckOnly('assign', permission.collectionPath)) {
-                  newSpecialPermissions.push(permission)
+              if (user.specialPermissions) {
+                const permissions: specialPermission[] = Object.values(user.specialPermissions);
+                for (const permission of permissions) {
+                  if (this.permissionCheckOnly('assign', permission.collectionPath)) {
+                    newSpecialPermissions.push(permission)
+                  }
                 }
               }
-            }
-            const item = {
-              docId,
-              email: user.email,
-              roles: newRoles,
-              specialPermissions: newSpecialPermissions,
-              meta: user.meta,
-              last_updated: user.last_updated,
-              isTemplate: user.isTemplate,
-              subCreate: user.subCreate,
-              userId: user.userId,
-              uid: user.uid
-            }
-            items[doc.id] = item;
+              const item = {
+                docId,
+                email: user.email,
+                roles: newRoles,
+                specialPermissions: newSpecialPermissions,
+                meta: user.meta,
+                last_updated: user.last_updated,
+                isTemplate: user.isTemplate,
+                subCreate: user.subCreate,
+                userId: user.userId,
+                uid: user.uid
+              }
+              items[doc.id] = item;
+            });
+            this.state.users = items;
           });
-          this.state.users = items;
-        });
-        this.unsubscibe.users = unsubscibe;
+          this.unsubscibe["staged-users"] = unsubscibe;
+        }
       }
-    }
+    };
+    this.usersSnapshotStarting = false;
   };
 
   public removeUserRoles = async (
@@ -1353,8 +1395,6 @@ export const EdgeFirebase = class {
     permissions: permissions
   ): Promise<actionResponse> => {
     const canAssign = await this.permissionCheck("assign", collectionPath);
-    // TODO: check if collectionPath starts with "users", "collection-data", "staged-users" and deny if so
-    // TODO add above check to rules as well
     if (canAssign) {
       if (role === "admin" || role === "editor" || role === "writer" || role === "user") {
         const currentTime = new Date().getTime();

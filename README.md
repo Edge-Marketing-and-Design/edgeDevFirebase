@@ -10,6 +10,7 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
 **[Firestore Static Collection Data](#firestore-static-collection-data)**   
 **[Await and response](#await-and-responses)**
+**[Firestore Rules](#firestore-rules)**
 
 # Installation
 
@@ -104,15 +105,135 @@ const edgeFirebase = inject("edgeFirebase");
 </script>
 ```
 
+### Firebase Trigger function.
+
+User mangement requires setting up in this firestore trigger function and helper functions  in your firebase functions:
+
+```javascript
+const functions = require('firebase-functions')
+const admin = require('firebase-admin')
+admin.initializeApp()
+const db = admin.firestore()
+
+// START @edge/firebase functions
+exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate((change, context) => {
+  const eventId = context.eventId
+  const eventRef = db.collection('events').doc(eventId)
+  const stagedDocId = context.params.docId
+  let newData = change.after.data()
+  const oldData = change.before.data()
+  return shouldProcess(eventRef).then((process) => {
+    if (process) {
+      // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
+      if (newData.userId) {
+        const userRef = db.collection('users').doc(newData.userId)
+        setUser(userRef, newData, oldData, stagedDocId).then(() => {
+          return markProcessed(eventRef)
+        })
+      }
+      else {
+        if (newData.templateUserId) {
+          newData.isTemplate = false
+          const templateUserId = newData.templateUserId
+          newData.meta = newData.templateMeta
+          delete newData.templateMeta
+          delete newData.templateUserId
+          if (Object.prototype.hasOwnProperty.call(newData, 'subCreate') && Object.values(newData.subCreate).length > 0) {
+            const subCreate = newData.subCreate
+            delete newData.subCreate
+            db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue }).then((addedDoc) => {
+              db.collection(subCreate.rootPath).doc(addedDoc.id).update({ docId: addedDoc.id }).then(() => {
+                delete newData.dynamicDocumentFieldValue
+                const newRole = { [`${subCreate.rootPath}-${addedDoc.id}`]: { collectionPath: `${subCreate.rootPath}-${addedDoc.id}`, role: subCreate.role } }
+                if (Object.prototype.hasOwnProperty.call(newData, 'collectionPaths')) {
+                  newData.collectionPaths.push(`${subCreate.rootPath}-${addedDoc.id}`)
+                }
+                else {
+                  newData.collectionPaths = [`${subCreate.rootPath}-${addedDoc.id}`]
+                }
+                const newRoles = { ...newData.roles, ...newRole }
+                newData = { ...newData, roles: newRoles }
+                const stagedUserRef = db.collection('staged-users').doc(templateUserId)
+                return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
+                  const userRef = db.collection('users').doc(templateUserId)
+                  setUser(userRef, newData, oldData, templateUserId).then(() => {
+                    return markProcessed(eventRef)
+                  })
+                })
+              })
+            })
+          }
+          else {
+            const stagedUserRef = db.collection('staged-users').doc(templateUserId)
+            return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
+              const userRef = db.collection('users').doc(templateUserId)
+              setUser(userRef, newData, oldData, templateUserId).then(() => {
+                return markProcessed(eventRef)
+              })
+            })
+          }
+        }
+      }
+      return markProcessed(eventRef)
+    }
+  })
+})
+
+function setUser(userRef, newData, oldData, stagedDocId) {
+  // IT's OK If "users" doesn't match exactly matched "staged-users" because this is only preventing
+  // writing from outside the @edgdev/firebase functions, so discrepancies will be rare since
+  // the package will prevent before it gets this far.
+  return userRef.get().then((user) => {
+    let userUpdate = { meta: newData.meta, stagedDocId }
+
+    if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
+      userUpdate = { ...userUpdate, roles: newData.roles }
+    }
+    if (Object.prototype.hasOwnProperty.call(newData, 'specialPermissions')) {
+      userUpdate = { ...userUpdate, specialPermissions: newData.specialPermissions }
+    }
+
+    if (!oldData.userId) {
+      userUpdate = { ...userUpdate, userId: newData.uid }
+    }
+    console.log(userUpdate)
+    if (!user.exists) {
+      return userRef.set(userUpdate)
+    }
+    else {
+      return userRef.update(userUpdate)
+    }
+  })
+}
+
+function shouldProcess(eventRef) {
+  return eventRef.get().then((eventDoc) => {
+    return !eventDoc.exists || !eventDoc.data().processed
+  })
+}
+
+function markProcessed(eventRef) {
+  return eventRef.set({ processed: true }).then(() => {
+    return null
+  })
+}
+
+// END @edge/firebase functions
+```
+
+### To make sure your project is secure, install the firestore rules document at the end this documentation. 
+
 # User Management and Collection Permissions
 
 ### Adding a User
 
-Users must be added before they can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below. 
+Users or "Template Users" must be added before someone can register with a login and password (the first user in the project will need to be added manual, see the section below "Root permissions and first user").  When adding a user you can pass role and/or special permissions and user meta data.  For more explanations on role and special permssions, see below. 
 
-Adding a user creates a document for them in the collection "staged-users". The docId of this documment is the use registration code and must be passed when using "registerUser".
+Adding a user creates a document for them in the collection "staged-users". The docId of this documment is the used as a registration code and must be passed when using "registerUser" using the "registrationCode" variable.
 
-To bypass adding users and allow "self registration".  You can add a user that is a "template" user.  By setting the field "template" = true. For a template you can also set a role for a dynamic collection name defined by the user on registration, by setting the field "subCreate", like this:  subCreate: {rootPath: "myItems", role: "admin"}.  Then when registering the user you can pass a "subCreatePath" variable, like this:  subCreatePath: "subThings".  This will automatically assign the user to the role specified.  In the above example the user would be register is an admin for for the collectionPath: myItems/subThings.
+The collection "staged-users" is a staging zone for all modifications and severs to sanitize the actual users in the "users" collection. Once a user is registered their staged-user is linked to their "users" user.  Genreally speaking the users in the "users" collection should not be modified. In fact, if you adopt the firestore rules shown in this document direct modification of users in the "users" collection is not allowed. All user related functions in this package (editing of meta, setting rules and special permssions, listing of users) are done on the "staged-users" collection. 
+
+To bypass adding users and allow "self registration".  You can add a user that is a "Template User".  By setting the field "template" = true. For a template user  you can also set up dynamic document generation and assigning of the registered user to that document with a specified role, but setting "subCreate".   Then when registering the user you can pass a "dynamicDocumentFieldValue" variable.  In the example below, if on registration you passed: dynamicDocumentFieldValue = "My New Organization", a document would be created under myItems that would look like this: {name:  "My New Organization"}.  The user would also be assigned as an admin to that newly created document.   If your project is going to be completly self registration, you can can create a "Template User" and hard code that registation id into your registation process.
 
 How to add a user:
 
@@ -131,9 +252,33 @@ edgeFirebase.addUser({
       }
     ],
     meta: { firstName: "John", lastName: "Doe", age: 28 } // This is just an example of meta, it can contain any fields and any number of fields.
-    template: true,  //Only true if setting up template for self registation
-    subCreate: { rootPath: "myItems", role: "admin" }
+    template: true,  // Optional - Only true if setting up template for self registation
+    subCreate: {
+          rootPath: 'myItems',
+          role: 'admin',
+          dynamicDocumentField: 'name',
+          documentStructure: {
+            name: '',
+          },
+        }
 });
+```
+
+```typescript
+interface newUser {
+  roles: role[];
+  specialPermissions: specialPermission[];
+  meta: object;
+  isTemplate?: boolean;
+  subCreate?: {
+    rootPath: string, // This must be a collection path (odd number of segments) since a document will be created and assigned to ther user here.
+    role: string, // must be admin, editor, writer, user
+    dynamicDocumentField: string, // This is the field in the document that will be set by the value of "dynamicDocumentFieldValue" passed during registration, like "name"
+    documentStructure: {
+      [key: string]: any
+    }
+  };
+}
 ```
 
 
@@ -150,9 +295,19 @@ After someoene has been added as a user they will need to "self register" to beg
       firstName: "John",
       lastName: "Doe"
     } // This is just an example of meta, it can contain any fields and any number of fields.
-    registrationCode: docId // This is the docId of either an added user or a template user, when using a template you can simply hardcode the registrationCode of the remplate to allow self registration.
-    subCreatePath: // See explaintion above about self registration and dynamic collectionPath for user roles.
+    registrationCode: (document id) // This is the document id of either an added user or a template user, when using a template you can simply hardcode the registrationCode of the remplate to allow self registration.
+    dynamicDocumentFieldValue: "" // Optional - See explaintion above about self registration and dynamic collectionPath for user roles.
   });
+```
+
+```typescript
+interface userRegister {
+  email: string;
+  password: string;
+  meta: object;
+  registrationCode: string;
+  dynamicDocumentFieldValue?: string;
+}
 ```
 
 
@@ -603,6 +758,296 @@ interface actionResponse {
   message: string;
   meta: {}
 }
+```
+
+# Firestore Rules
+
+```javascript
+rules_version = '2';
+service cloud.firestore {
+
+  match /databases/{database}/documents/events/{event} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+  
+  match /databases/{database}/documents/rule-helpers/{helper} {
+    allow read: if false;
+    allow create: if request.auth.uid == request.resource.data.uid;  
+    allow update: if request.auth.uid == request.resource.data.uid;
+    allow delete: if false; 
+  }
+
+  match /databases/{database}/documents/users/{user} {
+      function readSelf() {
+        return  resource == null ||
+                (
+                  "userId" in resource.data && 
+                  resource.data.userId == request.auth.uid
+                );
+      }
+    
+    allow read: if readSelf();
+    allow create: if false;
+    allow update: if false;
+    allow delete: if false;
+  }
+
+  match /databases/{database}/documents/collection-data/{collectionPath} {
+    // TODO: these rules need tested.
+    function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+    }
+    function canAssign() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data['edge-assignment-helper'];
+      return collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$") &&
+      (
+        "specialPermissions" in user &&
+        ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
+        "assign" in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
+         user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath]["assign"]
+      ) ||
+      (
+        "roles" in user && 
+        ruleHelper[collectionPath].permissionCheckPath in user.roles &&
+        "role" in user.roles[ruleHelper[collectionPath].permissionCheckPath] &&
+         getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, collectionPath, "assign")
+      );
+    }
+    allow read: if request.auth != null; // All signed in users can read collection-data
+    allow create: if canAssign();
+    allow update: if canAssign();
+    allow delete: if canAssign();
+  }
+
+  match /databases/{database}/documents/staged-users/{user} {
+
+    function canUpdate() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      
+      return (
+              resource == null ||
+              request.resource.data.userId == resource.data.userId ||
+              (
+                resource.data.userId == "" &&
+                (
+                  request.resource.data.userId == request.auth.uid ||
+                  request.resource.data.templateUserId == request.auth.uid
+                )
+              )
+             ) && 
+             "edge-assignment-helper" in ruleHelper &&
+             permissionUpdatesCheck(user, ruleHelper, "roles") && 
+             permissionUpdatesCheck(user, ruleHelper, "specialPermssions") && 
+             request.auth.uid == request.resource.data.uid;
+    }
+
+
+    function permissionUpdatesCheck(user, ruleHelper, permissionType) {
+      return !(permissionType in request.resource.data) ||
+              (
+                resource.data.userId == request.auth.uid && 
+                request.resource.data[permissionType].keys().hasOnly(resource.data[permissionType].keys())
+              ) ||
+              (
+                resource.data.userId != request.auth.uid &&
+                 permissionCheck(permissionType, user, ruleHelper)
+              );
+    }
+    function permissionCheck(permissionType, user, ruleHelper) {
+        let lastPathUpdated = ruleHelper["edge-assignment-helper"].fullPath;
+        let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
+        return request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 0 || 
+            (
+              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 1 && 
+              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys() == [lastPathUpdated].toSet() &&
+              (
+                 permissionCheckPath == "-" || 
+                 lastPathUpdated.matches("^" + permissionCheckPath + ".*$")
+              ) &&
+              (
+                (
+                  "roles" in user &&
+                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
+                ) ||
+                (
+                  "specialPermissions" in user &&
+                  permissionCheckPath in user.specialPermissions &&
+                  "assign" in user.specialPermissions[permissionCheckPath] &&
+                  user.specialPermissions[permissionCheckPath]["assign"]
+                )
+              )
+            );
+    }
+
+    function canAssign(user, ruleHelper) {
+      return request.auth != null &&
+             "edge-assignment-helper" in ruleHelper &&
+             (
+              (
+                "roles" in user &&
+                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.roles &&
+                getRolePermission(user.roles[ruleHelper["edge-assignment-helper"].permissionCheckPath].role, ruleHelper["edge-assignment-helper"].permissionCheckPath, 'assign')
+              ) ||
+              (
+                "specialPermissions" in user &&
+                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.specialPermissions &&
+                "assign" in user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath] &&
+                user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath]["assign"]
+              )
+             )
+    }
+
+    function canAssignSubCreatePath(user, ruleHelper) {
+      let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
+      return  (
+                !("subCreate" in request.resource.data) ||
+                (
+                  "subCreate" in request.resource.data &&
+                  request.resource.data.subCreate.keys().size() == 0 
+                )
+              )||
+              (
+                 permissionCheckPath == "-" || 
+                 request.resource.data.subCreate.rootPath.matches("^" + permissionCheckPath + ".*$")
+              ) &&
+              (
+                (
+                  "roles" in user &&
+                  permissionCheckPath in user.roles &&
+                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
+                ) ||
+                (
+                  "specialPermissions" in user &&
+                  permissionCheckPath in user.specialPermissions &&
+                  "assign" in user.specialPermissions[permissionCheckPath] &&
+                  user.specialPermissions[permissionCheckPath]["assign"]
+                )
+              )
+
+    }
+
+    function canList() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      return canAssign(user, ruleHelper);
+    }
+
+    function canCreate() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      return noPermissionData() && canAssign(user, ruleHelper) && canAssignSubCreatePath(user, ruleHelper);
+    }
+
+    function noPermissionData() {
+      return request.resource.data.roles.size() == 0 && request.resource.data.specialPermissions.size() == 0;
+    }
+
+    function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+      }
+
+     function canGet () {
+       return resource == null || 
+             ("userId" in resource.data && resource.data.userId == "") || 
+             ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
+             canAssign(get(/databases/$(database)/documents/users/$(request.auth.uid)).data, get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data);
+     }
+    allow get: if canGet();
+    allow list: if canList();
+    allow create: if canCreate();
+    allow update: if canUpdate();
+    allow delete: if false // TODO if isTemplate is true... can delete... otherwise users never deleted just removed from collection paths
+  }
+
+  match /databases/{database}/documents/{seg1} {
+      function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+      }
+      function checkPermission(collectionPath, permissionCheck) {
+          let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
+          let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+          return !(collectionPath in skipPaths) &&
+                  request.auth != null &&
+                  collectionPath in ruleHelper &&
+                  "permissionCheckPath" in ruleHelper[collectionPath] &&
+                  (
+                    ruleHelper[collectionPath].permissionCheckPath == "-" ||
+                    collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$")
+                  ) &&
+                  (
+                    (
+                      "roles" in user &&
+                      ruleHelper[collectionPath].permissionCheckPath in user.roles &&
+                      getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, ruleHelper[collectionPath].permissionCheckPath, permissionCheck)
+                    ) ||
+                    (
+                      "specialPermissions" in user &&
+                      ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
+                      permissionCheck in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
+                      user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath][permissionCheck]
+                    )
+                  );
+        }
+      match /{seg2} {
+        allow get: if checkPermission(seg1 + "-" + seg2, "read");
+        allow list: if checkPermission(seg1, "read");
+        allow create: if checkPermission(seg1, "write");
+        allow update: if checkPermission(seg1, "write");
+        allow delete: if checkPermission(seg1, "delete");
+        match /{seg3} {
+          allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
+          allow list: if checkPermission(seg1 + "-" + seg2, "read");
+          allow create: if checkPermission(seg1 + "-" + seg2, "write");
+          allow update: if checkPermission(seg1 + "-" + seg2, "write");
+          allow delete: if checkPermission(seg1 + "-" + seg2, "delete");
+          match /{seg4} {
+            allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
+            allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
+            allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
+            allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
+            allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "delete");
+
+            match /{seg5} {
+              allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
+              allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
+              allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
+              allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
+              allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "delete");
+              match /{seg6} {
+                allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
+                allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
+                allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
+                allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
+                allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "delete");
+                match /{seg7} {
+                  allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "read");
+                  allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
+                  allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
+                  allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
+                  allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "delete");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 ```
 
 
