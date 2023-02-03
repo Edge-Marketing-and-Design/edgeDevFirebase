@@ -9,7 +9,7 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 **[Firestore Basic Document Interactions](#firestore-Basic-document-interactions)**  
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
 **[Firestore Static Collection Data](#firestore-static-collection-data)**   
-**[Await and response](#await-and-responses)**
+**[Await and response](#responses)**  
 **[Firestore Rules](#firestore-rules)**
 
 # Installation
@@ -748,6 +748,7 @@ Most functions will return a response that can be used.
 
 ```javascript
 const response = edgeFirebase.startSnapshot("things");
+const response = await edgeFirebase.storeDoc("myItems", {name: "John Doe"});
 ```
 
 reponse:
