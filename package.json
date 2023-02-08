@@ -1,7 +1,7 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.7.1",
-  "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication and firestore.",
+  "version": "1.7.2",
+  "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 plugin for firebase authentication and firestore.",
   "main": "index.ts",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1"
