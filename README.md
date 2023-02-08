@@ -125,6 +125,7 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
   return shouldProcess(eventRef).then((process) => {
     if (process) {
       // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
+      // TODO: user might be invited to join another org with reg code.. if used when logged will combine new staged-user doc into first stage-user doc and sync to users.
       if (newData.userId) {
         const userRef = db.collection('users').doc(newData.userId)
         setUser(userRef, newData, oldData, stagedDocId).then(() => {
@@ -132,7 +133,7 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
         })
       }
       else {
-        if (newData.templateUserId) {
+        if (newData.templateUserId !== oldData.templateUserId) {
           newData.isTemplate = false
           const templateUserId = newData.templateUserId
           newData.meta = newData.templateMeta

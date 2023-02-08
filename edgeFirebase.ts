@@ -781,7 +781,7 @@ export const EdgeFirebase = class {
       }
     }
 
-    const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{}, isTemplate, subCreate };
+    const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{}, isTemplate, subCreate, templateUserId: "" };
 
     const docRef =  await addDoc(collection(this.db, "staged-users"), onlyMeta );
     for (const role of roles) {
@@ -1114,6 +1114,44 @@ export const EdgeFirebase = class {
       ...orderConditions,
       ...limitConditions
     );
+  };
+
+  // TODO: Document this and how the data is stored collectionPath + '/' + docId...
+  // Also stopSnapshot is by collectionPath + '/' + docId
+  public startDocumentSnapshot = async (
+    collectionPath: string,
+    docId: string
+  ): Promise<actionResponse> => {
+    console.log(collectionPath)
+    console.log(docId)
+    const canRead = await this.permissionCheck("read", collectionPath + '/' + docId);
+    this.data[collectionPath + '/' + docId] = {};
+    this.stopSnapshot(collectionPath + '/' + docId);
+    this.unsubscibe[collectionPath + '/' + docId] = null;
+    if (canRead) {
+      const docRef = doc(this.db, collectionPath, docId);
+      const unsubscribe = onSnapshot(docRef, (doc) => {
+        if (doc.exists()) {
+          const item = doc.data();
+          item.docId = doc.id;
+          this.data[collectionPath + '/' + docId] = item;
+        } else {
+          this.data[collectionPath + '/' + docId] = {};
+        }
+      });
+      this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {}
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: `You do not have permission to read from "${collectionPath}"`,
+        meta: {}
+      });
+    }
   };
 
   public startSnapshot = async(
