@@ -125,7 +125,6 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
   return shouldProcess(eventRef).then((process) => {
     if (process) {
       // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
-      // TODO: user might be invited to join another org with reg code.. if used when logged will combine new staged-user doc into first stage-user doc and sync to users.
       if (newData.userId) {
         const userRef = db.collection('users').doc(newData.userId)
         setUser(userRef, newData, oldData, stagedDocId).then(() => {
@@ -181,9 +180,6 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
 })
 
 function setUser(userRef, newData, oldData, stagedDocId) {
-  // IT's OK If "users" doesn't match exactly matched "staged-users" because this is only preventing
-  // writing from outside the @edgdev/firebase functions, so discrepancies will be rare since
-  // the package will prevent before it gets this far.
   return userRef.get().then((user) => {
     let userUpdate = { meta: newData.meta, stagedDocId }
 
