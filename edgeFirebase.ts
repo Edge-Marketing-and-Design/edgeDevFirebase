@@ -108,7 +108,7 @@ interface newUser {
     role: string,
     dynamicDocumentField: string, // This is the field in the document that will be set by the value of "dynamicDocumentFieldValue" passed during registration, like "name"
     documentStructure: {
-      [key: string]: any
+      [key: string]: unknown
     }
   };
 }
@@ -1480,62 +1480,107 @@ export const EdgeFirebase = class {
     }
   };
 
-  // Composable to update/add a document
-  public storeDoc = async (
+  // TODO: Add documentation for this function
+  public changeDoc = async (
     collectionPath: string,
-    item: object,
+    docId: string,
+    item: object
   ): Promise<actionResponse> => {
-    const canWrite = await this.permissionCheck("write", collectionPath);
+    const canWrite = await this.permissionCheck("write", collectionPath + "/" + docId);
     if (!canWrite) {
       return this.sendResponse({
         success: false,
-        message: `You do not have permission to write to "${collectionPath}"`,
+        message: `You do not have permission to write to "${collectionPath}/${docId}"`,
         meta: {}
       });
     } else {
+      const docRef = doc(this.db, collectionPath, docId);
+      const docSnap = await getDoc(docRef);
+      if (!docSnap.exists()) {
+        return this.sendResponse({
+          success: false,
+          message: `Document "${docId}" does not exist in "${collectionPath}"`,
+          meta: {}
+        });
+      }
       const cloneItem = JSON.parse(JSON.stringify(item));
       const currentTime = new Date().getTime();
       cloneItem.last_updated = currentTime;
       cloneItem.uid = this.user.uid;
-      if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
-        cloneItem.doc_created_at = currentTime;
-      }
-      if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
-        const docId = cloneItem.docId;
-        const canRead = this.permissionCheckOnly("read", collectionPath);
-        if (canRead) {
-          if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-            this.data[collectionPath][docId] = cloneItem;
-          }
-        }
-        await setDoc(doc(this.db, collectionPath, docId), cloneItem);
-        return this.sendResponse({
-          success: true,
-          message: "",
-          meta: {docId}
-        });
-      } else {
-        const docRef = await addDoc(
-          collection(this.db, collectionPath),
-          cloneItem
-        );
-        const canRead = this.permissionCheckOnly("read", collectionPath);
-        if (canRead) {
-          if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
-            this.data[collectionPath][docRef.id] = cloneItem;
-          }
-        }
-        await this.storeDoc(
-          collectionPath,
-          { ...cloneItem, docId: docRef.id }
-        );
-        return this.sendResponse({
-          success: true,
-          message: "",
-          meta: {docId: docRef.id}
-        });
-      }
+      await updateDoc(doc(this.db, collectionPath, docId), cloneItem);
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {}
+      });
     }
+  };
+
+
+  public storeDoc = async (
+    collectionPath: string,
+    item: object,
+  ): Promise<actionResponse> => {
+    
+    const cloneItem = JSON.parse(JSON.stringify(item));
+    const currentTime = new Date().getTime();
+    cloneItem.last_updated = currentTime;
+    cloneItem.uid = this.user.uid;
+    if (!Object.prototype.hasOwnProperty.call(cloneItem, "doc_created_at")) {
+      cloneItem.doc_created_at = currentTime;
+    }
+    if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
+      const canWrite = await this.permissionCheck("write", collectionPath + "/" + cloneItem.docId);
+      if (!canWrite) {
+        return this.sendResponse({
+          success: false,
+          message: `You do not have permission to write to "${collectionPath}/${cloneItem.docId}"`,
+          meta: {}
+        });
+      }
+      const docId = cloneItem.docId;
+      const canRead = this.permissionCheckOnly("read", collectionPath);
+      if (canRead) {
+        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+          this.data[collectionPath][docId] = cloneItem;
+        }
+      }
+      await setDoc(doc(this.db, collectionPath, docId), cloneItem);
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {docId}
+      });
+    } else {
+      const canWrite = await this.permissionCheck("write", collectionPath);
+      if (!canWrite) {
+        return this.sendResponse({
+          success: false,
+          message: `You do not have permission to write to "${collectionPath}"`,
+          meta: {}
+        });
+      }
+      const docRef = await addDoc(
+        collection(this.db, collectionPath),
+        cloneItem
+      );
+      const canRead = this.permissionCheckOnly("read", collectionPath);
+      if (canRead) {
+        if (Object.prototype.hasOwnProperty.call(this.data, collectionPath)) {
+          this.data[collectionPath][docRef.id] = cloneItem;
+        }
+      }
+      await this.storeDoc(
+        collectionPath,
+        { ...cloneItem, docId: docRef.id }
+      );
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {docId: docRef.id}
+      });
+    }
+    
   };
 
   // Composable to delete a document

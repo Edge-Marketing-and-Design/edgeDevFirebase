@@ -1005,38 +1005,38 @@ service cloud.firestore {
         allow get: if checkPermission(seg1 + "-" + seg2, "read");
         allow list: if checkPermission(seg1, "read");
         allow create: if checkPermission(seg1, "write");
-        allow update: if checkPermission(seg1, "write");
+        allow update: if checkPermission(seg1 + "-" + seg2, "write");
         allow delete: if checkPermission(seg1, "delete");
         match /{seg3} {
           allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
           allow list: if checkPermission(seg1 + "-" + seg2, "read");
           allow create: if checkPermission(seg1 + "-" + seg2, "write");
-          allow update: if checkPermission(seg1 + "-" + seg2, "write");
+          allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
           allow delete: if checkPermission(seg1 + "-" + seg2, "delete");
           match /{seg4} {
             allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
             allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
             allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
-            allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
+            allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
             allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "delete");
 
             match /{seg5} {
               allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
               allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
               allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
-              allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
+              allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
               allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "delete");
               match /{seg6} {
                 allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
                 allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
                 allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
-                allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
+                allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
                 allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "delete");
                 match /{seg7} {
                   allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "read");
                   allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
                   allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
-                  allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
+                  allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "write");
                   allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "delete");
                 }
               }
