@@ -44,6 +44,9 @@ import {
   connectAuthEmulator,
 } from "firebase/auth";
 
+
+import { getAnalytics, logEvent } from "firebase/analytics";
+
 interface FirestoreQuery {
   field: string;
   operator: WhereFilterOp; // '==' | '<' | '<=' | '>' | '>=' | 'array-contains' | 'in' | 'array-contains-any';
@@ -151,6 +154,7 @@ interface firebaseConfig {
   messagingSenderId: string;
   appId: string;
   emulatorAuth?: string;
+  measurementId?: string;
   emulatorFirestore?: string;
 }
 
@@ -174,6 +178,7 @@ export const EdgeFirebase = class {
       storageBucket: "",
       messagingSenderId: "",
       appId: "",
+      measurementId: "",
       emulatorAuth: "",
       emulatorFirestore: ""
     },
@@ -196,6 +201,10 @@ export const EdgeFirebase = class {
       connectFirestoreEmulator(this.db, "localhost", this.firebaseConfig.emulatorFirestore)
     }
 
+    if (this.firebaseConfig.measurementId) {
+      this.anaytics = getAnalytics(this.app);
+    }
+
     this.setOnAuthStateChanged();
   }
 
@@ -204,6 +213,14 @@ export const EdgeFirebase = class {
   public app = null;
   public auth = null;
   public db = null;
+
+  private anaytics = null;
+
+  public logAnalyticsEvent = (eventName: string, eventParams: object = {}) => {
+    if (this.anaytics) {
+      logEvent(this.anaytics, eventName, eventParams);
+    }
+  };
 
   private initUserMetaPermissions = async (docSnap): Promise<void> => {
     this.user.meta = {};
@@ -352,6 +369,7 @@ export const EdgeFirebase = class {
         this.user.uid = userAuth.uid;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
+        this.logAnalyticsEvent("login", { uid: this.user.uid });
         this.waitForUser();
       } else {
         this.user.email = "";
@@ -417,7 +435,7 @@ export const EdgeFirebase = class {
         initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
         await setDoc(doc(this.db, "rule-helpers", response.user.uid), initRoleHelper);
         await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), stagedUserUpdate)
-        
+        this.logAnalyticsEvent("sign_up", { uid: response.user.uid});
         return this.sendResponse({
           success: true,
           message: "",
@@ -806,6 +824,7 @@ export const EdgeFirebase = class {
       if (this.unsubscibe[key] instanceof Function) {
         this.unsubscibe[key]();
         this.unsubscibe[key] = null;
+        this.data[key] = {};
       }
     }
     signOut(this.auth).then(() => {
@@ -829,7 +848,7 @@ export const EdgeFirebase = class {
       credentials.password
     )
     .then(() => {
-      // do nothing
+     // Do nothing
     })
     .catch((error) => {
       this.user.email = "";
