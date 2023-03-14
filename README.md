@@ -374,12 +374,13 @@ Remove a role from a user for a collection:
 
 ### Root permissions and first user
 
-You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like a super admin.   If this is your first user, you will need to manually set them up in the Firstore console. Once a root user is added manually you can use this user to add other "root users" or setup other collections and assign roles to them.  The first time you login with your root user the collection-data/-default- role permissions document (mentioned above) will be automatically created.
+You can assign a user access to all collections in the entire project by giving them a role on "-", which is used to define the root collection path.  This would be for someone who is acting like a super admin.   If this is your first user, you will need to manually set them up in the Firstore console inside the "staged-users". Once a root user is added manually, you will need to "Register" that user using the docId of the "staged user" as the registration code, please see the user registration section of this documentation. You can use this user to add other "root users" or setup other collections and assign roles to them.  You will also need to manually create the collection-data/-default- role permissions document (mentioned above) and the root permission document, see examples below:
 
-| ![root-collection-roles](./images/root-collection-roles.png) | ![root-user](./images/root-user.jpg) |
-| ------------------------------------------------------------ | ------------------------------------ |
+![root-collection-roles](./images/default-collection-roles.png)
 
+![root-collection-roles](./images/root-collection-roles.png)
 
+![root-user](./images/root-user.png)
 
 ### User special permissions
 
