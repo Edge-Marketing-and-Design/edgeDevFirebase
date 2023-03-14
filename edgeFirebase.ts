@@ -1535,6 +1535,28 @@ export const EdgeFirebase = class {
     }
   };
 
+  //TODO: Add documentation for this function
+  public storeDocRaw = async (
+    collectionPath: string,
+    item: object,
+    docId?: string,
+  ): Promise<actionResponse> => {
+    const cloneItem = JSON.parse(JSON.stringify(item));
+    if (docId !== undefined) {
+      await setDoc( doc(this.db, collectionPath, docId), cloneItem);
+    } else {
+      await addDoc(
+        collection(this.db, collectionPath),
+        cloneItem
+      );
+    }
+    return this.sendResponse({
+      success: true,
+      message: "",
+      meta: {}
+    });
+  }
+
 
   public storeDoc = async (
     collectionPath: string,
