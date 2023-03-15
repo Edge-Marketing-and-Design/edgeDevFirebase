@@ -42,6 +42,7 @@ import {
   sendPasswordResetEmail,
   confirmPasswordReset,
   connectAuthEmulator,
+  deleteUser,
 } from "firebase/auth";
 
 
@@ -576,7 +577,32 @@ export const EdgeFirebase = class {
       });
     }
   };
-  
+
+  public deleteSelf = async (): Promise<actionResponse> => {
+    const userId = this.user.uid;
+    const userRef = doc(this.db, "users", userId);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+        const userStagingRef = doc(this.db, "staged-users", userSnap.data().stagedDocId)
+        await deleteDoc(userStagingRef);
+        await deleteDoc(userRef);
+        const user = this.auth.currentUser;
+        await deleteUser(user);
+        this.logOut();
+        return this.sendResponse({
+          success: true,
+          message: "",
+          meta: {}
+        });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: "User does not exist",
+        meta: {}
+      });
+    }
+  };
+
   public addUser = async (newUser: newUser): Promise<actionResponse> => {
     const canAssignRole = this.multiPermissionCheck(
       "assign",
@@ -1535,7 +1561,6 @@ export const EdgeFirebase = class {
     }
   };
 
-  //TODO: Add documentation for this function
   public storeDocRaw = async (
     collectionPath: string,
     item: object,
