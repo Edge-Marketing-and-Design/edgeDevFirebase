@@ -791,7 +791,7 @@ service cloud.firestore {
     allow read: if readSelf();
     allow create: if false;
     allow update: if false;
-    allow delete: if false;
+    allow delete: if readSelf();
   }
 
   match /databases/{database}/documents/collection-data/{collectionPath} {
@@ -966,7 +966,7 @@ service cloud.firestore {
     allow list: if canList();
     allow create: if canCreate();
     allow update: if canUpdate();
-    allow delete: if false // TODO if isTemplate is true... can delete... otherwise users never deleted just removed from collection paths
+		allow delete: if request.auth.uid == resource.data.userId // TODO: if isTemplate is true... can delete... if assign permission
   }
 
   match /databases/{database}/documents/{seg1} {
