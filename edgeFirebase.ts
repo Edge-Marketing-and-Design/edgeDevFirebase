@@ -578,6 +578,7 @@ export const EdgeFirebase = class {
     }
   };
 
+  //TODO: Document this function
   public deleteSelf = async (): Promise<actionResponse> => {
     const userId = this.user.uid;
     const userRef = doc(this.db, "users", userId);
