@@ -43,6 +43,9 @@ import {
   confirmPasswordReset,
   connectAuthEmulator,
   deleteUser,
+  OAuthProvider,
+  browserPopupRedirectResolver,
+  signInWithPopup,
 } from "firebase/auth";
 
 
@@ -80,6 +83,8 @@ interface permissions {
 
 type action = "assign" | "read" | "write" | "delete";
 
+type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple";
+
 interface role {
   collectionPath: "-" | string; // - is root
   role: "admin" | "editor" | "writer" | "user";
@@ -93,6 +98,8 @@ interface specialPermission {
 interface UserDataObject {
   uid: string | null;
   email: string;
+  firebaseUser: object;
+  oAuthCredential: { accessToken: string; idToken: string;}
   loggedIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
@@ -101,7 +108,6 @@ interface UserDataObject {
   specialPermissions: specialPermission[];
   stagedDocId: string;
 }
-
 interface newUser {
   roles: role[];
   specialPermissions: specialPermission[];
@@ -110,7 +116,7 @@ interface newUser {
   subCreate?: {
     rootPath: string, // This must be a collection path (odd number of segments) since a document will be created and assigned to ther user here.
     role: string,
-    dynamicDocumentField: string, // This is the field in the document that will be set by the value of "dynamicDocumentFieldValue" passed during registration, like "name"
+    dynamicDocumentFieldValue: string, // This is the field in the document that will be set by the value of "dynamicDocumentFieldValue" passed during registration, like "name"
     documentStructure: {
       [key: string]: unknown
     }
@@ -118,8 +124,8 @@ interface newUser {
 }
 
 interface userRegister {
-  email: string;
-  password: string;
+  email?: string;
+  password?: string;
   meta: object;
   registrationCode: string;
   dynamicDocumentFieldValue?: string;
@@ -192,7 +198,7 @@ export const EdgeFirebase = class {
       persistence = browserLocalPersistence;
     }
 
-    this.auth = initializeAuth(this.app, { persistence });
+    this.auth = initializeAuth(this.app, { persistence, popupRedirectResolver: browserPopupRedirectResolver });
     if (this.firebaseConfig.emulatorAuth) {
       connectAuthEmulator(this.auth, `http://localhost:${this.firebaseConfig.emulatorAuth}`)
     }
@@ -368,6 +374,7 @@ export const EdgeFirebase = class {
       if (userAuth) {
         this.user.email = userAuth.email;
         this.user.uid = userAuth.uid;
+        this.user.firebaseUser = userAuth;
         this.user.logInError = false;
         this.user.logInErrorMessage = "";
         this.logAnalyticsEvent("login", { uid: this.user.uid });
@@ -375,14 +382,57 @@ export const EdgeFirebase = class {
       } else {
         this.user.email = "";
         this.user.uid = null;
+        this.user.firebaseUser = null;
+        this.user.oAuthCredential.accessToken = "";
+        this.user.oAuthCredential.idToken = "";
         this.user.loggedIn = false;
-        this.user.logInError = false;
-        this.user.logInErrorMessage = "";
       }
     });
   };
+
+  public logInWithMicrosoft = async (providerScopes: string[] = []): Promise<void> => {
+      const result = await this.signInWithMicrosoft(providerScopes);
+      if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+        this.user.logInError = true;
+        this.user.logInErrorMessage = result
+        this.logOut();
+        return;
+      }
+      console.log(result.user.uid);
+      const userRef = doc(this.db, "staged-users", result.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) { 
+        this.user.logInError = true;
+        this.user.logInErrorMessage = "User does not exist";
+        this.logOut();
+      }
+  };
+
+  private registerUserWithMicrosoft = async (providerScopes: string[] = []): Promise<any> => {
+    const result = await this.signInWithMicrosoft(providerScopes);
+    return result;
+  };
+
+  private signInWithMicrosoft = async (providerScopes: string[] = []): Promise<any> => {
+    const provider = new OAuthProvider("microsoft.com");
+    for (const scope of providerScopes) {
+      provider.addScope(scope);
+    }
+    try {
+      const result = await signInWithPopup(this.auth, provider);
+      const credential = OAuthProvider.credentialFromResult(result);
+      this.user.oAuthCredential.accessToken = credential.accessToken;
+      this.user.oAuthCredential.idToken = credential.idToken;
+      return result;
+    } catch (error) {
+      return error;
+    }
+  }
+
   public registerUser = async (
-    userRegister: userRegister
+    userRegister: userRegister,
+    authProvider: authProviders = "email",
+    providerScopes: string[] = []
   ): Promise<actionResponse> => {
     if (!Object.prototype.hasOwnProperty.call(userRegister, 'registrationCode') || userRegister.registrationCode === "") {
       return this.sendResponse({
@@ -411,12 +461,27 @@ export const EdgeFirebase = class {
             });
          }
         }
-        // TODO: check if user is already registered, if so return error with auth
-        const response = await createUserWithEmailAndPassword(
-          this.auth,
-          userRegister.email,
-          userRegister.password
-        );
+        let response;
+        if (authProvider === "email") {
+          try {
+            response = await createUserWithEmailAndPassword(
+              this.auth,
+              userRegister.email,
+              userRegister.password
+            );
+          } catch (error) {
+            response = error;
+          }
+        } else if (authProvider === "microsoft") {
+         response = await this.registerUserWithMicrosoft(providerScopes);
+        }
+        if (!Object.prototype.hasOwnProperty.call(response, "user")) { 
+          return this.sendResponse({
+            success: false,
+            message: response,
+            meta: {}
+          });
+        }
 
         let metaUpdate = {};
         if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
@@ -578,7 +643,6 @@ export const EdgeFirebase = class {
     }
   };
 
-  //TODO: Document this function
   public deleteSelf = async (): Promise<actionResponse> => {
     const userId = this.user.uid;
     const userRef = doc(this.db, "users", userId);
@@ -856,10 +920,11 @@ export const EdgeFirebase = class {
     }
     signOut(this.auth).then(() => {
       this.user.uid = null;
+      this.user.firebaseUser = null;
+      this.user.oAuthCredential.accessToken = "";
+      this.user.oAuthCredential.idToken = "";
       this.user.email = "";
       this.user.loggedIn = false;
-      this.user.logInError = false;
-      this.user.logInErrorMessage = "";
       this.user.meta = {};
       this.user.roles = [];
       this.user.specialPermissions = [];
@@ -880,7 +945,9 @@ export const EdgeFirebase = class {
     .catch((error) => {
       this.user.email = "";
       this.user.uid = null;
-
+      this.user.firebaseUser = null;
+      this.user.oAuthCredential.accessToken = "";
+      this.user.oAuthCredential.idToken = "";
       this.user.loggedIn = false;
       this.user.logInError = true;
       this.user.logInErrorMessage = error.code + ": " + error.message;
@@ -906,11 +973,13 @@ export const EdgeFirebase = class {
     email: "",
     loggedIn: false,
     logInError: false,
-    logInErrorMessage: "",
+    logInErrorMessage: "",   
     meta: {},
     roles: [],
     specialPermissions: [],
     stagedDocId: null,
+    firebaseUser: null,
+    oAuthCredential: {accessToken: "", idToken: ""},
   });
 
   public state = reactive({
@@ -970,7 +1039,6 @@ export const EdgeFirebase = class {
     return { data, next: nextLast };
   };
 
-  // Class for wrapping a getSaticData to handle pagination
   get SearchStaticData() {
     const getStaticData = this.getStaticData;
     const permissionCheckOnly = this.permissionCheckOnly;
@@ -1162,8 +1230,6 @@ export const EdgeFirebase = class {
     );
   };
 
-  // TODO: Document this and how the data is stored collectionPath + '/' + docId...
-  // Also stopSnapshot is by collectionPath + '/' + docId
   public startDocumentSnapshot = async (
     collectionPath: string,
     docId: string
@@ -1526,7 +1592,6 @@ export const EdgeFirebase = class {
     }
   };
 
-  // TODO: Add documentation for this function
   public changeDoc = async (
     collectionPath: string,
     docId: string,
@@ -1650,7 +1715,6 @@ export const EdgeFirebase = class {
     
   };
 
-  // Composable to delete a document
   public removeDoc = async (
     collectionPath: string,
     docId: string
@@ -1679,7 +1743,6 @@ export const EdgeFirebase = class {
     }
   };
 
-  // Composable to stop snapshot listener
   public stopSnapshot = (collectionPath: string): void => {
     if (this.unsubscibe[collectionPath] instanceof Function) {
       this.unsubscibe[collectionPath]();

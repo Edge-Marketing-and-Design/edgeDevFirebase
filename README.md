@@ -576,6 +576,8 @@ The user object is reactive and contains these items:
 interface UserDataObject {
   uid: string | null;
   email: string;
+  firebaseUser: object; // contains the entire auth from firebase
+  oAuthCredential: object; // contains oAuth ID and token information
   loggedIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
