@@ -12,6 +12,10 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 **[Await and response](#responses)**  
 **[Firestore Rules](#firestore-rules)**
 
+
+
+Before diving into the documentation, it's important to note that when using this package, you should always use `await` or wait for promises to resolve. This ensures that the Rule Helpers work correctly and provides the necessary information for verifying user access rights. Failing to wait for promises may lead to inconsistencies in access control and unexpected behavior in your application. For more information about how this class handles user permissions, please refer to the section below: **Rule Helpers: Managing User Permissions in Firestore**.
+
 # Installation
 
 pnpm install @edgedev/firebase
@@ -105,7 +109,13 @@ const edgeFirebase = inject("edgeFirebase");
 </script>
 ```
 
-### Firebase Trigger function.
+### Firebase Trigger functions.
+
+These function react to updates in the `staged-users` Firestore collection. This trigger is designed to help maintain data consistency between the `staged-users` and `users` collections. When a document in the `staged-users` collection is updated, the trigger performs checks and updates the corresponding user data in the `users` collection, ensuring that both collections stay in sync.
+
+The trigger considers various scenarios such as the presence of a `userId` field, differences between the old and new `templateUserId` fields, and event processing status. It uses helper functions like `setUser`, `shouldProcess`, and `markProcessed` to manage these scenarios and make the necessary updates to the `users` collection. These functions handle tasks like updating or creating user documents, checking if an event should be processed, and marking an event as processed.
+
+In essence, the `updateUser` trigger streamlines user data management by automatically synchronizing updates between the `staged-users` and `users` collections in your Firebase project and adds another layer of security.
 
 User mangement requires setting up in this firestore trigger function and helper functions  in your firebase functions:
 
@@ -253,7 +263,7 @@ edgeFirebase.addUser({
     subCreate: {
           rootPath: 'myItems',
           role: 'admin',
-          dynamicDocumentField: 'name',
+          dynamicDocumentFieldValue: 'name',
           documentStructure: {
             name: '',
           },
@@ -299,12 +309,31 @@ After someoene has been added as a user they will need to "self register" to beg
 
 ```typescript
 interface userRegister {
-  email: string;
-  password: string;
+  email?: string;
+  password?: string;
   meta: object;
   registrationCode: string;
   dynamicDocumentFieldValue?: string;
 }
+```
+
+#### Registration using Microsoft Provider.
+
+Calling this will generate a Microsoft Sign In Popup and register the user using the Microsoft credentials.
+
+```javascript
+ edgeFirebase.registerUser(
+   {
+    meta: {
+      firstName: "John",
+      lastName: "Doe"
+    } // This is just an example of meta, it can contain any fields and any number of fields.
+    registrationCode: (document id) // This is the document id of either an added user or a template user, when using a template you can simply hardcode the registrationCode of the remplate to allow self registration.
+    dynamicDocumentFieldValue: "" // Optional - See explaintion above about self registration and dynamic collectionPath for user roles.
+  },
+  'microsoft', // This is the authProvider only 'email' or 'microsoft' are supported, default is 'email',
+  ["mail.read", "calendars.read"]  // This is a list of scopes to pass to Microsoft, the field is optional.
+);
 ```
 
 
@@ -408,7 +437,13 @@ Remove user special permissions:
   );
 ```
 
+### Rule Helpers: Managing User Permissions in Firestore
 
+The package provides a utility designed to assist in managing user permissions for various actions in your Firestore project. By taking a `collectionPath` and an `action` as input parameters, it determines the user's role and special permissions and saves a `RuleCheck` object to the `rule-helpers` collection.
+
+The `RuleCheck` object contains the permission type, permission check path, full path, and action, providing the necessary information to verify the user's access rights. By iterating through the user's roles and special permissions, the class identifies the correct permission check path and type.
+
+The class plays a crucial role in maintaining data security and access control within your Firestore project. It ensures that users can only perform actions they are authorized to, based on their roles and special permissions.
 
 ### Remove user
 
@@ -416,6 +451,26 @@ The remove user function doesn't actually delete the user completely from the sy
 
 ```javascript
 edgeFirebase.removeUser(docId);
+```
+
+
+
+### Delete Self
+
+This function allows a user to delete their own account. It removes the user's document from both the `users` and `staged-users` collections in the database and also deletes the user's authentication record. The function returns an `actionResponse` object indicating the success or failure of the operation.
+
+#### Usage
+
+To delete the current user's account, call the `deleteSelf` function:
+
+```javascript
+const response = await edgeFirebase.deleteSelf();
+
+if (response.success) {
+  console.log("Account deleted successfully.");
+} else {
+  console.log("Failed to delete account:", response.message);
+}
 ```
 
 
@@ -478,7 +533,7 @@ interface permissions {
 
 # Firebase Authentication
 
-(currently only sign in with email and password is supported)
+### Email and Password Login:
 
 ```javascript
   edgeFirebase.logIn(
@@ -489,7 +544,33 @@ interface permissions {
   );
 ```
 
-#### User information is contained in:  edgeFirebase.user
+### Log In with Microsoft
+
+This function allows users to log in using their Microsoft account. You can also specify an array of provider scopes if you want to request additional permissions from the user. The function returns a Promise that resolves when the sign-in process is complete. If the user does not exist, it will trigger an error and log the user out.
+
+#### Usage
+
+To log in with a Microsoft account, call the `logInWithMicrosoft` function. You can also pass an array of provider scopes as an optional parameter.
+
+```javascript
+// Log in using Microsoft account without additional provider scopes
+edgeFirebase.logInWithMicrosoft();
+
+// Log in using Microsoft account with additional provider scopes
+const providerScopes = ["User.Read", "Calendars.Read"];
+edgeFirebase.logInWithMicrosoft(providerScopes);
+```
+
+#### Parameters
+
+- `providerScopes` (optional): An array of strings representing the additional provider scopes to request from the user. Defaults to an empty array.
+
+#### Returns
+
+A Promise that resolves when the sign-in process is complete. The Promise resolves to void, but any errors that occur during the sign-in process are captured and stored in the `this.user.logInError` and `this.user.logInErrorMessage` properties.
+
+#### After Login, User information is contained in:  edgeFirebase.user
+
 The user object is reactive and contains these items:
 ```typescript
 interface UserDataObject {
@@ -607,6 +688,20 @@ edgeFirebase.storeDoc("myItems", addItem);
 ```
 Note: When a document is written to the collection several other keys are added that can be referenced:  **doc_created_at**(timestamp of doc creation), **last_updated**(timestamp document last written), **uid**(the user id of the user that updated or created the document).
 
+### Updating a Document Field(s)
+
+In contrast to the `storeDoc` method which adds or updates an entire document, you can use `edgeFirebase.changeDoc(collectionPath, docId, object)` to update individual fields in a document. This method allows you to specify the collection path, document ID, and the fields to update in the form of an object. It will only update the fields provided in the object while keeping the existing data in the document intact.
+
+```javascript
+<script setup>
+const docId = "exampleDocumentId";
+const updateItem = { title: "Updated Cool Thing" };
+edgeFirebase.changeDoc("myItems", docId, updateItem);
+</script>
+```
+
+In this example, the `changeDoc` method will update the title field of the specified document with the new value while preserving other fields. This is particularly useful when you need to modify a single field or a subset of fields in a document without affecting the rest of the data.
+
 ### Getting a single Document.
 If you want to query a single document from a collection use: **edgeFirebase.getDocData(collectionPath, docId)**
 ```javascript
@@ -626,7 +721,7 @@ const singleDoc = edgeFirebase.removeDoc("myItems", docId);
 ```
 
 # Firestore Snapshot Listeners
-### Starting a snapshot listener on a collection.
+### Starting a Snapshot listener on a collection
 To start a snapshot listen on a collection use: **edgeFirebase.startSnapshot(collectionPath)**
 ```javascript
 <script setup>
@@ -643,7 +738,22 @@ Once you have started a snapshot reactive data for that snapshot will be availab
   </div>
 </template>
 ```
+### Starting a Snapshot Listener on a Document
+
+To start a snapshot listener on a specific document within a collection, use the `edgeFirebase.startDocumentSnapshot(collectionPath, docId)` method.
+
+```javascript
+<script setup>
+  edgeFirebase.startDocumentSnapshot("myItems", "exampleDocId");
+</script>
+```
+
+Once you have started a snapshot listener on a document, reactive data for that snapshot will be available with `edgeFirebase.data[collectionPath + '/' + docId]`. This method first checks if the user has read permission for the specified document. If the user has permission, it starts the snapshot listener and updates the reactive data object accordingly. If the user doesn't have permission, it returns an error message indicating the lack of read access.
+
+
+
 ### Snapshot listeners can also be queried, sorted, and limited.
+
 #### Query and Sort are an array of objects, Limit is a number
 (if passing more than one query on different keys, FireStore may make you create indexes)
 ```typescript
@@ -675,7 +785,19 @@ edgeFirebase.stopSnapshot("myItems");
 </setup>
 ```
 
+When stopping a snapshot listener on a specific document within a collection, use the combined `collectionPath + '/' + docId` as the parameter for the `edgeFirebase.stopSnapshot()` method.
+
+For example:
+
+```javascript
+<script setup>
+const documentPath = "myItems/exampleDocId";
+edgeFirebase.stopSnapshot(documentPath);
+</script>
+```
+
 # Firestore Static Collection Data
+
 To get static data from a collection use the Object: **edgeFirebase.SearchStaticData()**. Static search is done from a class to handle pagination better.
 ```javascript
 const staticSearch = new edgeFirebase.SearchStaticData();

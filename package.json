@@ -1,10 +1,10 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.7.8",
+  "version": "1.7.9",
   "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 plugin for firebase authentication and firestore.",
   "main": "index.ts",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "postinstall": "if [ ! -f ./firestore.rules ]; then echo 'rules_version = \\'2\\';' > ./firestore.rules; else sed -i '1s/^/rules_version = \\'2\\';\\n/' ./firestore.rules; fi && awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/firestore.rules | sed 's/\\/\\\\/g; s/&/\\&/g' | sed -e 's/\"/\\\\\"/g' -e 's/\//\\\\\//g' | sed -e '1s/^/\\/\\/ #EDGE FIREBASE RULES START\\n/' -e '$s/$/\\n\\/\\/ #EDGE FIREBASE RULES END/' >> ./firestore.rules"
   },
   "author": "Seth Fischer",
   "keywords": [

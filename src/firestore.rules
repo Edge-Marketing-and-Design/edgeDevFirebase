@@ -1,0 +1,285 @@
+rules_version = '2';
+service cloud.firestore {
+
+  match /databases/{database}/documents/events/{event} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+  
+  match /databases/{database}/documents/rule-helpers/{helper} {
+    allow read: if false;
+    allow create: if request.auth.uid == request.resource.data.uid;  
+    allow update: if request.auth.uid == request.resource.data.uid;
+    allow delete: if false; 
+  }
+
+  match /databases/{database}/documents/users/{user} {
+      function readSelf() {
+        return  resource == null ||
+                (
+                  "userId" in resource.data && 
+                  resource.data.userId == request.auth.uid
+                );
+      }
+    
+    allow read: if readSelf();
+    allow create: if false;
+    allow update: if false;
+    allow delete: if false;
+  }
+
+  match /databases/{database}/documents/collection-data/{collectionPath} {
+    // TODO: these rules need tested.
+    function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+    }
+    function canAssign() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data['edge-assignment-helper'];
+      return collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$") &&
+      (
+        "specialPermissions" in user &&
+        ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
+        "assign" in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
+         user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath]["assign"]
+      ) ||
+      (
+        "roles" in user && 
+        ruleHelper[collectionPath].permissionCheckPath in user.roles &&
+        "role" in user.roles[ruleHelper[collectionPath].permissionCheckPath] &&
+         getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, collectionPath, "assign")
+      );
+    }
+    allow read: if request.auth != null; // All signed in users can read collection-data
+    allow create: if canAssign();
+    allow update: if canAssign();
+    allow delete: if canAssign();
+  }
+
+  match /databases/{database}/documents/staged-users/{user} {
+
+    function canUpdate() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      
+      return (
+              resource == null ||
+              request.resource.data.userId == resource.data.userId ||
+              (
+                resource.data.userId == "" &&
+                (
+                  request.resource.data.userId == request.auth.uid ||
+                  request.resource.data.templateUserId == request.auth.uid
+                )
+              )
+             ) && 
+             "edge-assignment-helper" in ruleHelper &&
+             permissionUpdatesCheck(user, ruleHelper, "roles") && 
+             permissionUpdatesCheck(user, ruleHelper, "specialPermssions") && 
+             request.auth.uid == request.resource.data.uid;
+    }
+
+
+    function permissionUpdatesCheck(user, ruleHelper, permissionType) {
+      return !(permissionType in request.resource.data) ||
+              (
+                resource.data.userId == request.auth.uid && 
+                request.resource.data[permissionType].keys().hasOnly(resource.data[permissionType].keys())
+              ) ||
+              (
+                resource.data.userId != request.auth.uid &&
+                 permissionCheck(permissionType, user, ruleHelper)
+              );
+    }
+    function permissionCheck(permissionType, user, ruleHelper) {
+        let lastPathUpdated = ruleHelper["edge-assignment-helper"].fullPath;
+        let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
+        return request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 0 || 
+            (
+              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 1 && 
+              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys() == [lastPathUpdated].toSet() &&
+              (
+                 permissionCheckPath == "-" || 
+                 lastPathUpdated.matches("^" + permissionCheckPath + ".*$")
+              ) &&
+              (
+                (
+                  "roles" in user &&
+                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
+                ) ||
+                (
+                  "specialPermissions" in user &&
+                  permissionCheckPath in user.specialPermissions &&
+                  "assign" in user.specialPermissions[permissionCheckPath] &&
+                  user.specialPermissions[permissionCheckPath]["assign"]
+                )
+              )
+            );
+    }
+
+    function canAssign(user, ruleHelper) {
+      return request.auth != null &&
+             "edge-assignment-helper" in ruleHelper &&
+             (
+              (
+                "roles" in user &&
+                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.roles &&
+                getRolePermission(user.roles[ruleHelper["edge-assignment-helper"].permissionCheckPath].role, ruleHelper["edge-assignment-helper"].permissionCheckPath, 'assign')
+              ) ||
+              (
+                "specialPermissions" in user &&
+                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.specialPermissions &&
+                "assign" in user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath] &&
+                user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath]["assign"]
+              )
+             )
+    }
+
+    function canAssignSubCreatePath(user, ruleHelper) {
+      let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
+      return  (
+                !("subCreate" in request.resource.data) ||
+                (
+                  "subCreate" in request.resource.data &&
+                  request.resource.data.subCreate.keys().size() == 0 
+                )
+              )||
+              (
+                 permissionCheckPath == "-" || 
+                 request.resource.data.subCreate.rootPath.matches("^" + permissionCheckPath + ".*$")
+              ) &&
+              (
+                (
+                  "roles" in user &&
+                  permissionCheckPath in user.roles &&
+                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
+                ) ||
+                (
+                  "specialPermissions" in user &&
+                  permissionCheckPath in user.specialPermissions &&
+                  "assign" in user.specialPermissions[permissionCheckPath] &&
+                  user.specialPermissions[permissionCheckPath]["assign"]
+                )
+              )
+
+    }
+
+    function canList() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      return canAssign(user, ruleHelper);
+    }
+
+    function canCreate() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+      return noPermissionData() && canAssign(user, ruleHelper) && canAssignSubCreatePath(user, ruleHelper);
+    }
+
+    function noPermissionData() {
+      return request.resource.data.roles.size() == 0 && request.resource.data.specialPermissions.size() == 0;
+    }
+
+    function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+      }
+
+     function canGet () {
+       return resource == null || 
+             ("userId" in resource.data && resource.data.userId == "") || 
+             ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
+             canAssign(get(/databases/$(database)/documents/users/$(request.auth.uid)).data, get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data);
+     }
+    allow get: if canGet();
+    allow list: if canList();
+    allow create: if canCreate();
+    allow update: if canUpdate();
+    allow delete: if false // TODO if isTemplate is true... can delete... otherwise users never deleted just removed from collection paths
+  }
+
+  match /databases/{database}/documents/{seg1} {
+      function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+      }
+      function checkPermission(collectionPath, permissionCheck) {
+          let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
+          let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
+          return !(collectionPath in skipPaths) &&
+                  request.auth != null &&
+                  collectionPath in ruleHelper &&
+                  "permissionCheckPath" in ruleHelper[collectionPath] &&
+                  (
+                    ruleHelper[collectionPath].permissionCheckPath == "-" ||
+                    collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$")
+                  ) &&
+                  (
+                    (
+                      "roles" in user &&
+                      ruleHelper[collectionPath].permissionCheckPath in user.roles &&
+                      getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, ruleHelper[collectionPath].permissionCheckPath, permissionCheck)
+                    ) ||
+                    (
+                      "specialPermissions" in user &&
+                      ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
+                      permissionCheck in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
+                      user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath][permissionCheck]
+                    )
+                  );
+        }
+      match /{seg2} {
+        allow get: if checkPermission(seg1 + "-" + seg2, "read");
+        allow list: if checkPermission(seg1, "read");
+        allow create: if checkPermission(seg1, "write");
+        allow update: if checkPermission(seg1 + "-" + seg2, "write");
+        allow delete: if checkPermission(seg1, "delete");
+        match /{seg3} {
+          allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
+          allow list: if checkPermission(seg1 + "-" + seg2, "read");
+          allow create: if checkPermission(seg1 + "-" + seg2, "write");
+          allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
+          allow delete: if checkPermission(seg1 + "-" + seg2, "delete");
+          match /{seg4} {
+            allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
+            allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
+            allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
+            allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
+            allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "delete");
+
+            match /{seg5} {
+              allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
+              allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
+              allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
+              allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
+              allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "delete");
+              match /{seg6} {
+                allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
+                allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
+                allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
+                allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
+                allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "delete");
+                match /{seg7} {
+                  allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "read");
+                  allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
+                  allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
+                  allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "write");
+                  allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "delete");
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
