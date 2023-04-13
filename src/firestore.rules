@@ -1,4 +1,4 @@
-rules_version = '2';
+// #EDGE FIREBASE RULES START
 service cloud.firestore {
 
   match /databases/{database}/documents/events/{event} {
@@ -283,3 +283,4 @@ service cloud.firestore {
       }
     }
   }
+  // #EDGE FIREBASE RULES END
