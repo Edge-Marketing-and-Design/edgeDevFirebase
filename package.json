@@ -1,10 +1,10 @@
 {
   "name": "@edgedev/firebase",
-  "version": "1.8.0",
+  "version": "1.8.1",
   "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 plugin for firebase authentication and firestore.",
   "main": "index.ts",
   "scripts": {
-    "postinstall": "bash ./scripts/postinstall.sh"
+    "postinstall": "bash ./node_modules/@edgedev/firebase/src/postinstall.sh"
   },
   "author": "Seth Fischer",
   "keywords": [
