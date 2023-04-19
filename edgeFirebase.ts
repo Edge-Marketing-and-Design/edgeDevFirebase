@@ -1633,6 +1633,7 @@ export const EdgeFirebase = class {
     docId?: string,
   ): Promise<actionResponse> => {
     const cloneItem = JSON.parse(JSON.stringify(item));
+    cloneItem.uid = this.user.uid;
     if (docId !== undefined) {
       await setDoc( doc(this.db, collectionPath, docId), cloneItem);
     } else {
