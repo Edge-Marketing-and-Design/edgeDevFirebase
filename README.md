@@ -770,6 +770,8 @@ staticSearch.getData("myItems", query, sort, limit);
 
 # Run a Cloud Function
 
+### edgeFirebase.runFunction('cloudFunction', {data});
+
 This function allows you to invoke a specified cloud function by providing its name and an optional data object. The user's UID is automatically added to the data object before the cloud function is called.
 
 #### Parameters
