@@ -8,7 +8,8 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for firebase authentication 
 **[Firebase Authentication](#firebase-authentication)**  
 **[Firestore Basic Document Interactions](#firestore-Basic-document-interactions)**  
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
-**[Firestore Static Collection Data](#firestore-static-collection-data)**   
+**[Firestore Static Collection Data](#firestore-static-collection-data)**  
+**[Run a Cloud Function](#run-a-cloud-function)**  
 **[Await and response](#responses)**  
 **[Firestore Rules](#firestore-rules)**
 
@@ -38,6 +39,7 @@ const config = {
     appId: "your-appId",
     emulatorAuth: "",  // local emlulator port populated app will be started with auth emulator
     emulatorFirestore: "", // local emlulator port populated app will be started with firestore emulator
+    emulatorFunctions: "", // local emulator port populated app will be started with functions emulator, used  to test Cloud Functions locally.
   };
 const isPersistant = true // If "persistence" is true, login will be saved locally, they can close their browser and when they open they will be logged in automatically.  If "persistence" is false login saved only for the session.
 const edgeFirebase = new EdgeFirebase(config, isPersistant);
@@ -68,6 +70,7 @@ app.use(eFb, {
     appId: "your-appId",
     emulatorAuth: "",  // local emlulator port populated app will be started with auth emulator
     emulatorFirestore: "", // local emlulator port populated app will be started with firestore emulator
+    emulatorFunctions: "", // local emulator port populated app will be started with functions emulator, used  to test Cloud Functions locally.
   }, isPersistant)
 //end edgeFirebase
 
@@ -117,7 +120,7 @@ The trigger considers various scenarios such as the presence of a `userId` field
 
 In essence, the `updateUser` trigger streamlines user data management by automatically synchronizing updates between the `staged-users` and `users` collections in your Firebase project and adds another layer of security.
 
-User mangement requires setting up in this firestore trigger function and helper functions  in your firebase functions:
+User mangement requires setting up a firestore trigger function and helper functions  in your firebase functions, these functions are automatically added to functions/index.js in your project, wrapped in "// START @edge/firebase functions" and "// END @edge/firebase functions".
 
 ```javascript
 const functions = require('firebase-functions')
@@ -126,105 +129,7 @@ admin.initializeApp()
 const db = admin.firestore()
 
 // START @edge/firebase functions
-exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate((change, context) => {
-  const eventId = context.eventId
-  const eventRef = db.collection('events').doc(eventId)
-  const stagedDocId = context.params.docId
-  let newData = change.after.data()
-  const oldData = change.before.data()
-  return shouldProcess(eventRef).then((process) => {
-    if (process) {
-      // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
-      if (newData.userId) {
-        const userRef = db.collection('users').doc(newData.userId)
-        setUser(userRef, newData, oldData, stagedDocId).then(() => {
-          return markProcessed(eventRef)
-        })
-      }
-      else {
-        if (newData.templateUserId !== oldData.templateUserId) {
-          newData.isTemplate = false
-          const templateUserId = newData.templateUserId
-          newData.meta = newData.templateMeta
-          delete newData.templateMeta
-          delete newData.templateUserId
-          if (Object.prototype.hasOwnProperty.call(newData, 'subCreate') && Object.values(newData.subCreate).length > 0) {
-            const subCreate = newData.subCreate
-            delete newData.subCreate
-            db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue }).then((addedDoc) => {
-              db.collection(subCreate.rootPath).doc(addedDoc.id).update({ docId: addedDoc.id }).then(() => {
-                delete newData.dynamicDocumentFieldValue
-                const newRole = { [`${subCreate.rootPath}-${addedDoc.id}`]: { collectionPath: `${subCreate.rootPath}-${addedDoc.id}`, role: subCreate.role } }
-                if (Object.prototype.hasOwnProperty.call(newData, 'collectionPaths')) {
-                  newData.collectionPaths.push(`${subCreate.rootPath}-${addedDoc.id}`)
-                }
-                else {
-                  newData.collectionPaths = [`${subCreate.rootPath}-${addedDoc.id}`]
-                }
-                const newRoles = { ...newData.roles, ...newRole }
-                newData = { ...newData, roles: newRoles }
-                const stagedUserRef = db.collection('staged-users').doc(templateUserId)
-                return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
-                  const userRef = db.collection('users').doc(templateUserId)
-                  setUser(userRef, newData, oldData, templateUserId).then(() => {
-                    return markProcessed(eventRef)
-                  })
-                })
-              })
-            })
-          }
-          else {
-            const stagedUserRef = db.collection('staged-users').doc(templateUserId)
-            return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
-              const userRef = db.collection('users').doc(templateUserId)
-              setUser(userRef, newData, oldData, templateUserId).then(() => {
-                return markProcessed(eventRef)
-              })
-            })
-          }
-        }
-      }
-      return markProcessed(eventRef)
-    }
-  })
-})
-
-function setUser(userRef, newData, oldData, stagedDocId) {
-  return userRef.get().then((user) => {
-    let userUpdate = { meta: newData.meta, stagedDocId }
-
-    if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
-      userUpdate = { ...userUpdate, roles: newData.roles }
-    }
-    if (Object.prototype.hasOwnProperty.call(newData, 'specialPermissions')) {
-      userUpdate = { ...userUpdate, specialPermissions: newData.specialPermissions }
-    }
-
-    if (!oldData.userId) {
-      userUpdate = { ...userUpdate, userId: newData.uid }
-    }
-    console.log(userUpdate)
-    if (!user.exists) {
-      return userRef.set(userUpdate)
-    }
-    else {
-      return userRef.update(userUpdate)
-    }
-  })
-}
-
-function shouldProcess(eventRef) {
-  return eventRef.get().then((eventDoc) => {
-    return !eventDoc.exists || !eventDoc.data().processed
-  })
-}
-
-function markProcessed(eventRef) {
-  return eventRef.set({ processed: true }).then(() => {
-    return null
-  })
-}
-
+	.......
 // END @edge/firebase functions
 ```
 
@@ -259,7 +164,7 @@ edgeFirebase.addUser({
       }
     ],
     meta: { firstName: "John", lastName: "Doe", age: 28 } // This is just an example of meta, it can contain any fields and any number of fields.
-    template: true,  // Optional - Only true if setting up template for self registation
+    isTemplate: true,  // Optional - Only true if setting up template for self registation
     subCreate: {
           rootPath: 'myItems',
           role: 'admin',
@@ -863,6 +768,66 @@ staticSearch.getData("myItems", query, sort, limit);
 </script>
 ```
 
+# Run a Cloud Function
+
+This function allows you to invoke a specified cloud function by providing its name and an optional data object. The user's UID is automatically added to the data object before the cloud function is called.
+
+#### Parameters
+
+- `functionName`: A string representing the name of the cloud function to be invoked.
+- `data`: An optional object containing key-value pairs that will be passed to the cloud function as arguments. The user's UID is automatically included in the data object.
+
+#### Returns
+
+A Promise that resolves to the result of the invoked cloud function.
+
+#### Example
+
+Suppose you have a cloud function named `sendNotification` that takes two arguments: `message` and `recipientId`.
+
+1. First, you need to define the `sendNotification` function in your Firebase `index.js`:
+
+```javascript
+const functions = require('firebase-functions');
+
+exports.sendNotification = functions.https.onCall(async (data, context) => {
+  if (data.uid !== context.auth.uid) {
+    throw new functions.https.HttpsError('permission-denied', 'Unauthorized access');
+  }
+
+  const message = data.message;
+  const recipientId = data.recipientId;
+  const uid = data.uid; // The user's UID is automatically included in the data object
+
+  // Your notification sending logic here
+
+  return { success: true, message: 'Notification sent successfully' };
+});
+```
+
+1. To call this function using the `runFunction` method, you would do the following:
+
+```javascript
+<script setup>
+  const edgeFirebase = ...; // Reference to the object containing the runFunction method
+  const sendNotification = async () => {
+    try {
+      const message = "Hello, User!";
+      const recipientId = "someUserId";
+      const result = await edgeFirebase.runFunction("sendNotification", { message, recipientId });
+      console.log("Notification sent successfully:", result);
+    } catch (error) {
+      console.error("Error sending notification:", error);
+    }
+  };
+</script>
+
+<template>
+  <button @click="sendNotification">Send Notification</button>
+</template>
+```
+
+In this example, clicking the "Send Notification" button will invoke the `sendNotification` cloud function with the specified `message` and `recipientId`. The result of the function will be logged to the console. The cloud function checks if the provided `data.uid` matches the authenticated user's UID (`context.auth.uid`) for security purposes.
 
 # Responses
 
@@ -885,292 +850,13 @@ interface actionResponse {
 
 # Firestore Rules
 
+Firestore rules are automatically written to your project in the firestore.rules file the are wrapped in: "// #EDGE FIREBASE RULES START" and "// #EDGE FIREBASE RULES END"
+
 ```javascript
 rules_version = '2';
-service cloud.firestore {
+// #EDGE FIREBASE RULES START
 
-  match /databases/{database}/documents/events/{event} {
-    allow read: if false;
-    allow create: if false;  
-    allow update: if false; 
-    allow delete: if false; 
-  }
-  
-  match /databases/{database}/documents/rule-helpers/{helper} {
-    allow read: if false;
-    allow create: if request.auth.uid == request.resource.data.uid;  
-    allow update: if request.auth.uid == request.resource.data.uid;
-    allow delete: if false; 
-  }
-
-  match /databases/{database}/documents/users/{user} {
-      function readSelf() {
-        return  resource == null ||
-                (
-                  "userId" in resource.data && 
-                  resource.data.userId == request.auth.uid
-                );
-      }
-    
-    allow read: if readSelf();
-    allow create: if false;
-    allow update: if false;
-    allow delete: if readSelf();
-  }
-
-  match /databases/{database}/documents/collection-data/{collectionPath} {
-    // TODO: these rules need tested.
-    function getRolePermission(role, collection, permissionCheck) {
-        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
-        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
-        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
-              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
-    }
-    function canAssign() {
-      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data['edge-assignment-helper'];
-      return collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$") &&
-      (
-        "specialPermissions" in user &&
-        ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
-        "assign" in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
-         user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath]["assign"]
-      ) ||
-      (
-        "roles" in user && 
-        ruleHelper[collectionPath].permissionCheckPath in user.roles &&
-        "role" in user.roles[ruleHelper[collectionPath].permissionCheckPath] &&
-         getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, collectionPath, "assign")
-      );
-    }
-    allow read: if request.auth != null; // All signed in users can read collection-data
-    allow create: if canAssign();
-    allow update: if canAssign();
-    allow delete: if canAssign();
-  }
-
-  match /databases/{database}/documents/staged-users/{user} {
-
-    function canUpdate() {
-      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
-      
-      return (
-              resource == null ||
-              request.resource.data.userId == resource.data.userId ||
-              (
-                resource.data.userId == "" &&
-                (
-                  request.resource.data.userId == request.auth.uid ||
-                  request.resource.data.templateUserId == request.auth.uid
-                )
-              )
-             ) && 
-             "edge-assignment-helper" in ruleHelper &&
-             permissionUpdatesCheck(user, ruleHelper, "roles") && 
-             permissionUpdatesCheck(user, ruleHelper, "specialPermssions") && 
-             request.auth.uid == request.resource.data.uid;
-    }
-
-
-    function permissionUpdatesCheck(user, ruleHelper, permissionType) {
-      return !(permissionType in request.resource.data) ||
-              (
-                resource.data.userId == request.auth.uid && 
-                request.resource.data[permissionType].keys().hasOnly(resource.data[permissionType].keys())
-              ) ||
-              (
-                resource.data.userId != request.auth.uid &&
-                 permissionCheck(permissionType, user, ruleHelper)
-              );
-    }
-    function permissionCheck(permissionType, user, ruleHelper) {
-        let lastPathUpdated = ruleHelper["edge-assignment-helper"].fullPath;
-        let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
-        return request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 0 || 
-            (
-              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys().size() == 1 && 
-              request.resource.data[permissionType].diff(resource.data[permissionType]).affectedKeys() == [lastPathUpdated].toSet() &&
-              (
-                 permissionCheckPath == "-" || 
-                 lastPathUpdated.matches("^" + permissionCheckPath + ".*$")
-              ) &&
-              (
-                (
-                  "roles" in user &&
-                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
-                ) ||
-                (
-                  "specialPermissions" in user &&
-                  permissionCheckPath in user.specialPermissions &&
-                  "assign" in user.specialPermissions[permissionCheckPath] &&
-                  user.specialPermissions[permissionCheckPath]["assign"]
-                )
-              )
-            );
-    }
-
-    function canAssign(user, ruleHelper) {
-      return request.auth != null &&
-             "edge-assignment-helper" in ruleHelper &&
-             (
-              (
-                "roles" in user &&
-                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.roles &&
-                getRolePermission(user.roles[ruleHelper["edge-assignment-helper"].permissionCheckPath].role, ruleHelper["edge-assignment-helper"].permissionCheckPath, 'assign')
-              ) ||
-              (
-                "specialPermissions" in user &&
-                ruleHelper["edge-assignment-helper"].permissionCheckPath in user.specialPermissions &&
-                "assign" in user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath] &&
-                user.specialPermissions[ruleHelper["edge-assignment-helper"].permissionCheckPath]["assign"]
-              )
-             )
-    }
-
-    function canAssignSubCreatePath(user, ruleHelper) {
-      let permissionCheckPath = ruleHelper["edge-assignment-helper"].permissionCheckPath;
-      return  (
-                !("subCreate" in request.resource.data) ||
-                (
-                  "subCreate" in request.resource.data &&
-                  request.resource.data.subCreate.keys().size() == 0 
-                )
-              )||
-              (
-                 permissionCheckPath == "-" || 
-                 request.resource.data.subCreate.rootPath.matches("^" + permissionCheckPath + ".*$")
-              ) &&
-              (
-                (
-                  "roles" in user &&
-                  permissionCheckPath in user.roles &&
-                  getRolePermission(user.roles[permissionCheckPath].role, permissionCheckPath, "assign")
-                ) ||
-                (
-                  "specialPermissions" in user &&
-                  permissionCheckPath in user.specialPermissions &&
-                  "assign" in user.specialPermissions[permissionCheckPath] &&
-                  user.specialPermissions[permissionCheckPath]["assign"]
-                )
-              )
-
-    }
-
-    function canList() {
-      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
-      return canAssign(user, ruleHelper);
-    }
-
-    function canCreate() {
-      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-      let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
-      return noPermissionData() && canAssign(user, ruleHelper) && canAssignSubCreatePath(user, ruleHelper);
-    }
-
-    function noPermissionData() {
-      return request.resource.data.roles.size() == 0 && request.resource.data.specialPermissions.size() == 0;
-    }
-
-    function getRolePermission(role, collection, permissionCheck) {
-        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
-        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
-        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
-              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
-      }
-
-     function canGet () {
-       return resource == null || 
-             ("userId" in resource.data && resource.data.userId == "") || 
-             ("userId" in resource.data && resource.data.userId == request.auth.uid) ||
-             canAssign(get(/databases/$(database)/documents/users/$(request.auth.uid)).data, get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data);
-     }
-    allow get: if canGet();
-    allow list: if canList();
-    allow create: if canCreate();
-    allow update: if canUpdate();
-		allow delete: if request.auth.uid == resource.data.userId // TODO: if isTemplate is true... can delete... if assign permission
-  }
-
-  match /databases/{database}/documents/{seg1} {
-      function getRolePermission(role, collection, permissionCheck) {
-        let pathCollectionPermissions = get(/databases/$(database)/documents/collection-data/$(collection)).data;
-        let defaultPermissions = get(/databases/$(database)/documents/collection-data/-default-).data;
-        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
-              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
-      }
-      function checkPermission(collectionPath, permissionCheck) {
-          let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
-          let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
-          return !(collectionPath in skipPaths) &&
-                  request.auth != null &&
-                  collectionPath in ruleHelper &&
-                  "permissionCheckPath" in ruleHelper[collectionPath] &&
-                  (
-                    ruleHelper[collectionPath].permissionCheckPath == "-" ||
-                    collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$")
-                  ) &&
-                  (
-                    (
-                      "roles" in user &&
-                      ruleHelper[collectionPath].permissionCheckPath in user.roles &&
-                      getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, ruleHelper[collectionPath].permissionCheckPath, permissionCheck)
-                    ) ||
-                    (
-                      "specialPermissions" in user &&
-                      ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
-                      permissionCheck in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
-                      user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath][permissionCheck]
-                    )
-                  );
-        }
-      match /{seg2} {
-        allow get: if checkPermission(seg1 + "-" + seg2, "read");
-        allow list: if checkPermission(seg1, "read");
-        allow create: if checkPermission(seg1, "write");
-        allow update: if checkPermission(seg1 + "-" + seg2, "write");
-        allow delete: if checkPermission(seg1, "delete");
-        match /{seg3} {
-          allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
-          allow list: if checkPermission(seg1 + "-" + seg2, "read");
-          allow create: if checkPermission(seg1 + "-" + seg2, "write");
-          allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
-          allow delete: if checkPermission(seg1 + "-" + seg2, "delete");
-          match /{seg4} {
-            allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
-            allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "read");
-            allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "write");
-            allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
-            allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3, "delete");
-
-            match /{seg5} {
-              allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
-              allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "read");
-              allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "write");
-              allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
-              allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4, "delete");
-              match /{seg6} {
-                allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
-                allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "read");
-                allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "write");
-                allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
-                allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5, "delete");
-                match /{seg7} {
-                  allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "read");
-                  allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "read");
-                  allow create: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
-                  allow update: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "write");
-                  allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "delete");
-                }
-              }
-            }
-          }
-        }
-      }
-    }
-  }
+// #EDGE FIREBASE RULES END
 ```
 
 

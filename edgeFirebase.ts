@@ -48,6 +48,7 @@ import {
   signInWithPopup,
 } from "firebase/auth";
 
+import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
 import { getAnalytics, logEvent } from "firebase/analytics";
 
@@ -163,6 +164,7 @@ interface firebaseConfig {
   emulatorAuth?: string;
   measurementId?: string;
   emulatorFirestore?: string;
+  emulatorFunctions?: string;
 }
 
 interface actionResponse {
@@ -187,7 +189,8 @@ export const EdgeFirebase = class {
       appId: "",
       measurementId: "",
       emulatorAuth: "",
-      emulatorFirestore: ""
+      emulatorFirestore: "",
+      emulatorFunctions: ""
     },
     isPersistant: false
   ) {
@@ -212,6 +215,10 @@ export const EdgeFirebase = class {
       this.anaytics = getAnalytics(this.app);
     }
 
+    this.functions = getFunctions(this.app);
+    if (this.firebaseConfig.emulatorFunctions) {
+      connectFunctionsEmulator(this.functions, "localhost", this.firebaseConfig.emulatorFunctions)
+    }
     this.setOnAuthStateChanged();
   }
 
@@ -222,6 +229,14 @@ export const EdgeFirebase = class {
   public db = null;
 
   private anaytics = null;
+
+  private functions = null;
+
+  public runFunction = async (functionName: string, data: { [key: string]: unknown }) => {
+    data.uid = this.user.uid;
+    const callable = httpsCallable(this.functions, functionName);
+    return await callable(data);
+  };
 
   public logAnalyticsEvent = (eventName: string, eventParams: object = {}) => {
     if (this.anaytics) {
@@ -399,7 +414,7 @@ export const EdgeFirebase = class {
         return;
       }
       console.log(result.user.uid);
-      const userRef = doc(this.db, "users", result.user.uid);
+      const userRef = doc(this.db, "staged-users", result.user.uid);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) { 
         this.user.logInError = true;
