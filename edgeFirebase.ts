@@ -46,6 +46,7 @@ import {
   OAuthProvider,
   browserPopupRedirectResolver,
   signInWithPopup,
+  updateEmail,
 } from "firebase/auth";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -236,6 +237,24 @@ export const EdgeFirebase = class {
     data.uid = this.user.uid;
     const callable = httpsCallable(this.functions, functionName);
     return await callable(data);
+  };
+
+  //TODO:  Document this: 
+  public updateEmail = async (newEmail: string): Promise<actionResponse> => {
+    try {
+      await updateEmail(this.auth.currentUser, newEmail);
+      return {
+        success: true,
+        message: "Email updated",
+        meta: {}
+      };
+    } catch (error) {
+      return {
+        success: false,
+        message: error.message,
+        meta: {}
+      };
+    }
   };
 
   public logAnalyticsEvent = (eventName: string, eventParams: object = {}) => {

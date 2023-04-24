@@ -341,7 +341,7 @@ Remove user special permissions:
     "myItems/subitems/things"
   );
 ```
-
+-------STOPPED HERE
 ### Rule Helpers: Managing User Permissions in Firestore
 
 The package provides a utility designed to assist in managing user permissions for various actions in your Firestore project. By taking a `collectionPath` and an `action` as input parameters, it determines the user's role and special permissions and saves a `RuleCheck` object to the `rule-helpers` collection.
@@ -378,7 +378,7 @@ if (response.success) {
 }
 ```
 
-
+---STOP HERE
 
 ### Users Snapshot Data
 
