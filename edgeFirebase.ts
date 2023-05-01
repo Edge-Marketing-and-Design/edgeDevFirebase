@@ -239,7 +239,6 @@ export const EdgeFirebase = class {
     return await callable(data);
   };
 
-  //TODO:  Document this: 
   public updateEmail = async (newEmail: string): Promise<actionResponse> => {
     try {
       await updateEmail(this.auth.currentUser, newEmail);

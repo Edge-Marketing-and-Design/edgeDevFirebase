@@ -542,6 +542,46 @@ const login = () => {
 };
 </script>
 ```
+### Updating User Email
+
+To update the email address of the current authenticated user, use the `edgeFirebase.updateEmail(newEmail)` method.
+
+```javascript
+const response = await edgeFirebase.updateEmail("new.email@example.com");
+```
+
+#### Parameters
+
+- `newEmail` (string): The new email address to set for the user.
+
+#### Returns
+
+The method returns a Promise that resolves to an `actionResponse` object:
+
+```typescript
+interface actionResponse {
+  success: boolean;
+  message: string;
+  meta: {};
+}
+```
+
+Example usage:
+
+```javascript
+<script setup>
+  async function changeEmail() {
+    const newEmail = "new.email@example.com";
+    const response = await edgeFirebase.updateEmail(newEmail);
+    if (response.success) {
+      console.log("Email updated successfully");
+    } else {
+      console.error("Error updating email:", response.message);
+    }
+  }
+</script>
+```
+
 
 ### Change password:
 
