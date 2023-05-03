@@ -632,7 +632,7 @@ export const EdgeFirebase = class {
 
   public removeUser = async (docId: string): Promise<actionResponse> => {
     const removedFrom = [];
-    const userRef = doc(this.db, "users", docId);
+    const userRef = doc(this.db, "staged-users", docId);
     const userSnap = await getDoc(userRef);
     if (userSnap.data().roles) {
       for (const collectionPath in userSnap.data().roles) {
@@ -653,7 +653,7 @@ export const EdgeFirebase = class {
           collectionPath.replaceAll("-", "/")
         );
         if (canAssign) {
-          this.removeUserSpecialPermissions(
+         await this.removeUserSpecialPermissions(
             docId,
             collectionPath.replaceAll("-", "/")
           );
@@ -662,10 +662,11 @@ export const EdgeFirebase = class {
       }
     }
     if (removedFrom.length > 0) {
+      const response = await this.runFunction("removeNonRegisteredUser", {uid: this.user.uid, docId});
       return this.sendResponse({
         success: true,
         message: "",
-        meta: {}
+        meta: {response}
       });
     } else {
       return this.sendResponse({
@@ -892,8 +893,8 @@ export const EdgeFirebase = class {
   };
 
   private generateUserMeta = async (userMeta: newUser): Promise<actionResponse> => {
-    const roles: role[] = userMeta.roles;
-    const specialPermissions: specialPermission[] = userMeta.specialPermissions;
+    const roles: role[] = userMeta.roles || [];
+    const specialPermissions: specialPermission[] = userMeta.specialPermissions || [];
     delete userMeta.roles;
     delete userMeta.specialPermissions;
 
@@ -1411,6 +1412,7 @@ export const EdgeFirebase = class {
     }
     if (canAssign) {
       await updateDoc(doc(this.db, "staged-users/" + docId), {
+        uid: this.user.uid,
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-")),
         ["roles." + collectionPath.replaceAll("/", "-")]: deleteField()
       });
@@ -1440,6 +1442,7 @@ export const EdgeFirebase = class {
     }
     if (canAssign) {
       await updateDoc(doc(this.db, "staged-users/" + docId), {
+        uid: this.user.uid,
         collectionPaths: arrayRemove(collectionPath.replaceAll("/", "-")),
         ["specialPermissions." + collectionPath.replaceAll("/", "-")]:
           deleteField()

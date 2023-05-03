@@ -1,4 +1,39 @@
 // START @edge/firebase functions
+exports.removeNonRegisteredUser = functions.https.onCall(async (data, context) => {
+  if (data.uid === context.auth.uid) {
+    const stagedUser = await db.collection('staged-users').doc(data.docId).get()
+    if (stagedUser.exists) {
+      const stagedUserData = stagedUser.data()
+
+      const rolesExist = stagedUserData.roles && Object.keys(stagedUserData.roles).length !== 0
+      const specialPermissionsExist = stagedUserData.specialPermissions && Object.keys(stagedUserData.specialPermissions).length !== 0
+      const userIdExistsAndNotBlank = stagedUserData.userId && stagedUserData.userId !== ''
+
+      if (!rolesExist && !specialPermissionsExist && !userIdExistsAndNotBlank) {
+        await db.collection('staged-users').doc(data.docId).delete()
+        return { success: true, message: '' }
+      }
+      else {
+        let message = ''
+        if (rolesExist && specialPermissionsExist) {
+          message = 'Cannot delete because the non-registered user still has roles and special permissions assigned.'
+        }
+        else if (rolesExist) {
+          message = 'Cannot delete because the non-registered user still has roles assigned.'
+        }
+        else if (specialPermissionsExist) {
+          message = 'Cannot delete because the non-registered user still has special permissions assigned.'
+        }
+        else if (userIdExistsAndNotBlank) {
+          message = 'Cannot delete because the user is registered.'
+        }
+        return { success: false, message }
+      }
+    }
+  }
+  return { success: false, message: 'Non-registered user not found.' }
+})
+
 exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate((change, context) => {
   const eventId = context.eventId
   const eventRef = db.collection('events').doc(eventId)

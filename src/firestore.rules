@@ -68,20 +68,27 @@ service cloud.firestore {
       let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
       
       return (
-              resource == null ||
-              request.resource.data.userId == resource.data.userId ||
+              request.auth.uid == request.resource.data.uid &&
               (
-                resource.data.userId == "" &&
                 (
-                  request.resource.data.userId == request.auth.uid ||
-                  request.resource.data.templateUserId == request.auth.uid
+                  (
+                     request.resource.data.userId == resource.data.userId ||
+                     resource.data.userId == ""
+                   ) &&
+                  (
+                    request.resource.data.userId == request.auth.uid ||
+                    request.resource.data.templateUserId == request.auth.uid
+                  )
+                ) ||
+                (
+                  request.resource.data.userId == resource.data.userId &&
+                  "edge-assignment-helper" in ruleHelper &&
+                  permissionUpdatesCheck(user, ruleHelper, "roles") && 
+                  permissionUpdatesCheck(user, ruleHelper, "specialPermssions")
                 )
               )
-             ) && 
-             "edge-assignment-helper" in ruleHelper &&
-             permissionUpdatesCheck(user, ruleHelper, "roles") && 
-             permissionUpdatesCheck(user, ruleHelper, "specialPermssions") && 
-             request.auth.uid == request.resource.data.uid;
+             );
+             
     }
 
 
