@@ -126,6 +126,7 @@ interface newUser {
 }
 
 interface userRegister {
+  uid?: string;
   email?: string;
   password?: string;
   meta: object;
@@ -233,7 +234,7 @@ export const EdgeFirebase = class {
 
   private functions = null;
 
-  public runFunction = async (functionName: string, data: { [key: string]: unknown }) => {
+  public runFunction = async (functionName: string, data: Record<string, unknown>) => {
     data.uid = this.user.uid;
     const callable = httpsCallable(this.functions, functionName);
     return await callable(data);
@@ -459,6 +460,32 @@ export const EdgeFirebase = class {
       return result;
     } catch (error) {
       return error;
+    }
+  }
+
+  public currentUserRegister = async (userRegister: userRegister): Promise<actionResponse> => {
+    if (!Object.prototype.hasOwnProperty.call(userRegister, 'registrationCode') || userRegister.registrationCode === "") {
+      return this.sendResponse({
+        success: false,
+        message: "Registration code is required.",
+        meta: {}
+      });
+    }
+    // userRegister.uid = this.user.uid;
+    const result = await this.runFunction("currentUserRegister", userRegister as unknown as Record<string, unknown>);
+    const resultData = result.data as {success: boolean, message: string};
+    if (resultData.success) {
+      return this.sendResponse({
+        success: true,
+        message: "",
+        meta: {}
+      });
+    } else {
+      return this.sendResponse({
+        success: false,
+        message: resultData.message,
+        meta: {}
+      });
     }
   }
 

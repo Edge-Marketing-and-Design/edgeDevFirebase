@@ -34,6 +34,56 @@ exports.removeNonRegisteredUser = functions.https.onCall(async (data, context) =
   return { success: false, message: 'Non-registered user not found.' }
 })
 
+exports.currentUserRegister = functions.https.onCall(async (data, context) => {
+  if (data.uid === context.auth.uid) {
+    const stagedUser = await db.collection('staged-users').doc(data.registrationCode).get()
+    if (!stagedUser.exists) {
+      return { success: false, message: 'Registration code not found.' }
+    }
+    else {
+      const stagedUserData = await stagedUser.data()
+      let process = false
+      if (stagedUserData.isTemplate) {
+        process = true
+      }
+      if (!stagedUserData.isTemplate && stagedUserData.userId === '') {
+        process = true
+      }
+      if (!process) {
+        return { success: false, message: 'Registration code not valid.' }
+      }
+      const newRoles = stagedUserData.roles || {}
+      const currentUser = await db.collection('users').doc(data.uid).get()
+      const currentUserData = await currentUser.data()
+      const currentRoles = currentUserData.roles || {}
+      const currentUserCollectionPaths = currentUserData.collectionPaths || []
+      let newRole = {}
+      if (stagedUserData.subCreate && Object.keys(stagedUserData.subCreate).length !== 0 && stagedUserData.isTemplate) {
+        if (!data.dynamicDocumentFieldValue) {
+          return { success: false, message: 'Dynamic document field value is required.' }
+        }
+        const rootPath = stagedUserData.subCreate.rootPath
+        const newDoc = stagedUserData.subCreate.documentStructure
+        newDoc[stagedUserData.subCreate.dynamicDocumentField] = data.dynamicDocumentFieldValue
+        const addedDoc = await db.collection(rootPath).add(newDoc)
+        await db.collection(rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
+        newRole = { [`${rootPath}-${addedDoc.id}`]: { collectionPath: `${rootPath}-${addedDoc.id}`, role: stagedUserData.subCreate.role } }
+      }
+      const combinedRoles = { ...currentRoles, ...newRoles, ...newRole }
+      Object.values(combinedRoles).forEach((role) => {
+        if (!currentUserCollectionPaths.includes(role.collectionPath)) {
+          currentUserCollectionPaths.push(role.collectionPath)
+        }
+      })
+      await db.collection('staged-users').doc(currentUserData.stagedDocId).update({ roles: combinedRoles, collectionPaths: currentUserCollectionPaths })
+      if (!stagedUserData.isTemplate) {
+        await db.collection('staged-users').doc(data.registrationCode).delete()
+      }
+      return { success: true, message: '' }
+    }
+  }
+})
+
 exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate((change, context) => {
   const eventId = context.eventId
   const eventRef = db.collection('events').doc(eventId)

@@ -239,6 +239,63 @@ Calling this will generate a Microsoft Sign In Popup and register the user using
 );
 ```
 
+### Inviting an Existing User to Register with a New Organization or Member
+
+To invite an existing user to register with a new organization or member's data and get the corresponding roles, use the `edgeFirebase.currentUserRegister(userRegister)` method.
+
+```javascript
+const userRegisterData = {
+  registrationCode: "12345",
+  dynamicDocumentFieldValue: "fieldName",
+};
+
+const response = await edgeFirebase.currentUserRegister(userRegisterData);
+```
+
+#### Parameters
+
+- `userRegister` (object): An object containing the user registration data. It must include a `registrationCode` property provided by the inviting organization or member. It can also include a `dynamicDocumentFieldValue` property, which is a single string representing the name of an additional data field for registration.
+
+```typescript
+interface userRegister {
+  registrationCode: string;
+  dynamicDocumentFieldValue?: string;
+}
+```
+
+#### Returns
+
+The method returns a Promise that resolves to an `actionResponse` object:
+
+```typescript
+interface actionResponse {
+  success: boolean;
+  message: string;
+  meta: {};
+}
+```
+
+Example usage:
+
+```javascript
+<script setup>
+  async function inviteExistingUser() {
+    const userRegisterData = {
+      registrationCode: "12345",
+      dynamicDocumentFieldValue: "fieldName",
+    };
+
+    const response = await edgeFirebase.currentUserRegister(userRegisterData);
+    if (response.success) {
+      console.log("Existing user invited and registered successfully");
+    } else {
+      console.error("Error inviting and registering existing user:", response.message);
+    }
+  }
+</script>
+```
+
+
 ### Explanation of permissions
 
 - **assign: boolean** - When a user has this permission for a collection they can assign other users to the collection and change permissions for that collection. For a user to be able run setUser, storeCollectionPermisions, storeUserRoles, removeUserRoles, storeUserSpecialPermissions, or removeUserSpecialPermissions, they must have assign access to any of the collection paths passed into those functions.
