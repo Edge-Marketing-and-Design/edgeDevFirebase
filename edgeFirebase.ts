@@ -103,6 +103,7 @@ interface UserDataObject {
   firebaseUser: object;
   oAuthCredential: { accessToken: string; idToken: string;}
   loggedIn: boolean;
+  loggingIn: boolean;
   logInError: boolean;
   logInErrorMessage: string;
   meta: object;
@@ -388,6 +389,7 @@ export const EdgeFirebase = class {
     await this.startCollectionPermissionsSync()
     await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
+    this.user.loggingIn = false;
   };
 
   private waitForUser = async(): Promise<void> => {
@@ -406,6 +408,7 @@ export const EdgeFirebase = class {
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
       if (userAuth) {
+        this.user.loggingIn = true;
         this.user.email = userAuth.email;
         this.user.uid = userAuth.uid;
         this.user.firebaseUser = userAuth;
@@ -420,6 +423,7 @@ export const EdgeFirebase = class {
         this.user.oAuthCredential.accessToken = "";
         this.user.oAuthCredential.idToken = "";
         this.user.loggedIn = false;
+        this.user.loggingIn = false;
       }
     });
   };
@@ -559,6 +563,7 @@ export const EdgeFirebase = class {
         }
         const initRoleHelper = {uid: response.user.uid}
         initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
+        this.user.loggingIn = true;
         await setDoc(doc(this.db, "rule-helpers", response.user.uid), initRoleHelper);
         await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), stagedUserUpdate)
         this.logAnalyticsEvent("sign_up", { uid: response.user.uid});
@@ -986,6 +991,7 @@ export const EdgeFirebase = class {
       this.user.oAuthCredential.idToken = "";
       this.user.email = "";
       this.user.loggedIn = false;
+      this.user.loggingIn = false;
       this.user.meta = {};
       this.user.roles = [];
       this.user.specialPermissions = [];
@@ -1011,6 +1017,7 @@ export const EdgeFirebase = class {
       this.user.oAuthCredential.idToken = "";
       this.user.loggedIn = false;
       this.user.logInError = true;
+      this.user.loggingIn = false;
       this.user.logInErrorMessage = error.code + ": " + error.message;
     });
   };
@@ -1032,6 +1039,7 @@ export const EdgeFirebase = class {
   public user: UserDataObject = reactive({
     uid: null,
     email: "",
+    loggingIn: false,
     loggedIn: false,
     logInError: false,
     logInErrorMessage: "",   
@@ -1327,7 +1335,7 @@ export const EdgeFirebase = class {
     }
   };
 
-  public startSnapshot = async(
+  public startSnapshot = async (
     collectionPath: string,
     queryList: FirestoreQuery[] = [],
     orderList: FirestoreOrderBy[] = [],
@@ -1339,20 +1347,32 @@ export const EdgeFirebase = class {
     this.unsubscibe[collectionPath] = null;
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max);
-      const unsubscribe = onSnapshot(q, (querySnapshot) => {
-        const items = {};
-        querySnapshot.forEach((doc) => {
-          const item = doc.data();
-          item.docId = doc.id;
-          items[doc.id] = item;
+  
+      return new Promise<actionResponse>((resolve, reject) => {
+        const unsubscribe = onSnapshot(q, (querySnapshot) => {
+          const items = {};
+          querySnapshot.forEach((doc) => {
+            const item = doc.data();
+            item.docId = doc.id;
+            items[doc.id] = item;
+          });
+          this.data[collectionPath] = items;
+          this.unsubscibe[collectionPath] = unsubscribe;
+  
+          // Resolve the Promise with the success response
+          resolve(this.sendResponse({
+            success: true,
+            message: "",
+            meta: {}
+          }));
+        }, (error) => {
+          // Reject the Promise with the error response
+          reject(this.sendResponse({
+            success: false,
+            message: `Error fetching data from "${collectionPath}": ${error.message}`,
+            meta: {}
+          }));
         });
-        this.data[collectionPath] = items;
-      });
-      this.unsubscibe[collectionPath] = unsubscribe;
-      return this.sendResponse({
-        success: true,
-        message: "",
-        meta: {}
       });
     } else {
       return this.sendResponse({

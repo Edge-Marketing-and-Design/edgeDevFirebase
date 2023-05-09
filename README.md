@@ -532,6 +532,7 @@ interface UserDataObject {
   firebaseUser: object; // contains the entire auth from firebase
   oAuthCredential: object; // contains oAuth ID and token information
   loggedIn: boolean;
+  loggingIn: boolean: // true while logging in used for loading screens
   logInError: boolean;
   logInErrorMessage: string;
   meta: object;
@@ -558,6 +559,8 @@ interface permissions {
 }
 ```
 The reactive item **edgeFirebase.user.loggedIn** can be used in code or templates to determine if the user is logged in.
+
+**edgeFirebase.user.logginIn** is true while the user is logging in.  This can be used to show a loading screen.
 
 If there is an error logging in, **edgeFirebase.user.logInError** will be true and **edgeFirebase.user.logInErrorMessage** can be used to return that error to the user.
 
