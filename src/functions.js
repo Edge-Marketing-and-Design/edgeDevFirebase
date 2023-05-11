@@ -1,4 +1,39 @@
 // START @edge/firebase functions
+
+exports.initFirestore = functions.https.onCall(async (data, context) => {
+  // checks to see of the collections 'collection-data' and 'staged-users' exist if not will seed them with data
+  const collectionData = await db.collection('collection-data').get()
+  const stagedUsers = await db.collection('staged-users').get()
+  if (collectionData.empty) {
+    // create a document with the id of '-' and one called '-default-':
+    const admin = { assign: true, delete: true, read: true, write: true }
+    const editor = { assign: false, delete: true, read: true, write: true }
+    const writer = { assign: false, delete: false, read: true, write: true }
+    const user = { assign: false, delete: false, read: true, write: false }
+    await db.collection('collection-data').doc('-').set({ admin, editor, writer, user })
+    await db.collection('collection-data').doc('-default-').set({ admin, editor, writer, user })
+  }
+  if (stagedUsers.empty) {
+    const templateUser = {
+      docId: 'organization-registration-template',
+      isTemplate: true,
+      meta: {
+        name: 'Organization Registration Template',
+      },
+      subCreate: {
+        documentStructure: {
+          name: '',
+        },
+        dynamicDocumentField: 'name',
+        role: 'admin',
+        rootPath: 'organizations',
+      },
+      userId: '',
+    }
+    await db.collection('staged-users').doc('organization-registration-template').set(templateUser)
+  }
+})
+
 exports.removeNonRegisteredUser = functions.https.onCall(async (data, context) => {
   if (data.uid === context.auth.uid) {
     const stagedUser = await db.collection('staged-users').doc(data.docId).get()
