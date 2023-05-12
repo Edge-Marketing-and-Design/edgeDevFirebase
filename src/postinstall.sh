@@ -24,10 +24,10 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
 
 if [ ! -f "$project_root/functions/index.js" ]; then
   mkdir -p "$project_root/functions"
-  echo "const functions = require('firebase-functions');" > "$project_root/functions/index.js";
-  echo "const admin = require('firebase-admin');" >> "$project_root/functions/index.js";
-  echo "admin.initializeApp();" >> "$project_root/functions/index.js";
-  echo "const db = admin.firestore();" >> "$project_root/functions/index.js";
+  echo "const functions = require('firebase-functions')" > "$project_root/functions/index.js";
+  echo "const admin = require('firebase-admin')" >> "$project_root/functions/index.js";
+  echo "admin.initializeApp()" >> "$project_root/functions/index.js";
+  echo "const db = admin.firestore()" >> "$project_root/functions/index.js";
 fi   
 
 [ "$(tail -c1 $project_root/functions/index.js)" != "" ] && echo "" >> "$project_root/functions/index.js"
