@@ -1303,8 +1303,8 @@ export const EdgeFirebase = class {
     collectionPath: string,
     docId: string
   ): Promise<actionResponse> => {
-    console.log(collectionPath)
-    console.log(docId)
+    // console.log(collectionPath)
+    // console.log(docId)
     const canRead = await this.permissionCheck("read", collectionPath + '/' + docId);
     this.data[collectionPath + '/' + docId] = {};
     this.stopSnapshot(collectionPath + '/' + docId);
@@ -1347,8 +1347,9 @@ export const EdgeFirebase = class {
     this.unsubscibe[collectionPath] = null;
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max);
-  
+    
       return new Promise<actionResponse>((resolve, reject) => {
+        let firstRun = true;
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
           const items = {};
           querySnapshot.forEach((doc) => {
@@ -1358,13 +1359,25 @@ export const EdgeFirebase = class {
           });
           this.data[collectionPath] = items;
           this.unsubscibe[collectionPath] = unsubscribe;
-  
-          // Resolve the Promise with the success response
-          resolve(this.sendResponse({
-            success: true,
-            message: "",
-            meta: {}
-          }));
+          
+          // Only resolve or reject the Promise on first run of onSnapshot
+          if(firstRun) {
+            if(Object.keys(items).length > 0) { // resolve if items fetched
+              firstRun = false;
+              resolve(this.sendResponse({
+                success: true,
+                message: "",
+                meta: {}
+              }));
+            } else { // reject if no items fetched
+              firstRun = false;
+              reject(this.sendResponse({
+                success: false,
+                message: `No data found in "${collectionPath}"`,
+                meta: {}
+              }));
+            }
+          }
         }, (error) => {
           // Reject the Promise with the error response
           reject(this.sendResponse({
@@ -1382,6 +1395,7 @@ export const EdgeFirebase = class {
       });
     }
   };
+  
 
   private usersSnapshotStarting = false;
 
