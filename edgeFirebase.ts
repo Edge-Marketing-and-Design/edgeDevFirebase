@@ -1371,7 +1371,7 @@ export const EdgeFirebase = class {
               }));
             } else { // reject if no items fetched
               firstRun = false;
-              reject(this.sendResponse({
+              resolve(this.sendResponse({
                 success: false,
                 message: `No data found in "${collectionPath}"`,
                 meta: {}
