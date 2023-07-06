@@ -195,7 +195,8 @@ export const EdgeFirebase = class {
       emulatorFirestore: "",
       emulatorFunctions: ""
     },
-    isPersistant: false
+    isPersistant: false,
+    enablePopupRedirect: false,
   ) {
     this.firebaseConfig = firebaseConfig;
     this.app = initializeApp(this.firebaseConfig);
@@ -203,8 +204,11 @@ export const EdgeFirebase = class {
     if (isPersistant) {
       persistence = browserLocalPersistence;
     }
-
-    this.auth = initializeAuth(this.app, { persistence, popupRedirectResolver: browserPopupRedirectResolver });
+    if (enablePopupRedirect) {
+      this.auth = initializeAuth(this.app, { persistence, popupRedirectResolver: browserPopupRedirectResolver });
+    } else {
+      this.auth = initializeAuth(this.app, { persistence });
+    }
     if (this.firebaseConfig.emulatorAuth) {
       connectAuthEmulator(this.auth, `http://localhost:${this.firebaseConfig.emulatorAuth}`)
     }
