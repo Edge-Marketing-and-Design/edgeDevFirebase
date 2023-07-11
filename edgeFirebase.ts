@@ -1410,7 +1410,10 @@ export const EdgeFirebase = class {
   private usersSnapshotStarting = false;
 
   public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
+    console.log('startUsersSnapshot', collectionPath);
+    console.log(this.usersSnapshotStarting)
     if (!this.usersSnapshotStarting) {
+      console.log('startUsersSnapshot', collectionPath);
       this.usersSnapshotStarting = true;
       this.stopSnapshot("staged-users");
       this.state.users = {};
