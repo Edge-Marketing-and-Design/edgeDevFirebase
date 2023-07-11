@@ -814,6 +814,7 @@ export const EdgeFirebase = class {
       if (role) {
         ruleCheck.permissionCheckPath = permissionCheck;
         ruleCheck.permissionType = "roles";
+
       }
       const specialPermission = this.user.specialPermissions.find(
         (r) => r.collectionPath === permissionCheck
@@ -821,6 +822,11 @@ export const EdgeFirebase = class {
       if (specialPermission) {
         ruleCheck.permissionCheckPath = permissionCheck;
         ruleCheck.permissionType = "specialPermissions";
+      }
+      if (ruleCheck.permissionType !== "") {
+        if (this.permissionCheckOnly(action, permissionCheck)) {
+          break;
+        }
       }
       index--;
     }
