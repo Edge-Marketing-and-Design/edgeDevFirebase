@@ -485,7 +485,7 @@ export const EdgeFirebase = class {
     if (resultData.success) {
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 488",
         meta: {}
       });
     } else {
@@ -573,7 +573,7 @@ export const EdgeFirebase = class {
         this.logAnalyticsEvent("sign_up", { uid: response.user.uid});
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 576",
           meta: {}
         });
         
@@ -592,7 +592,7 @@ export const EdgeFirebase = class {
       await sendPasswordResetEmail(this.auth, email);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 595",
         meta: {}
       });
     } catch (error) {
@@ -613,7 +613,7 @@ export const EdgeFirebase = class {
       await confirmPasswordReset(this.auth, oobCode, password);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 616",
         meta: {}
       });
     } catch (error) {
@@ -639,7 +639,7 @@ export const EdgeFirebase = class {
       await updatePassword(user, password);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 642",
         meta: {}
       });
     } catch (error) {
@@ -661,7 +661,7 @@ export const EdgeFirebase = class {
     }
     return this.sendResponse({
       success: true,
-      message: "",
+      message: "line 664",
       meta: {}
     });
   };
@@ -701,7 +701,7 @@ export const EdgeFirebase = class {
       const response = await this.runFunction("removeNonRegisteredUser", {uid: this.user.uid, docId});
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 704",
         meta: {response}
       });
     } else {
@@ -726,7 +726,7 @@ export const EdgeFirebase = class {
         this.logOut();
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 729",
           meta: {}
         });
     } else {
@@ -981,7 +981,7 @@ export const EdgeFirebase = class {
     }
     return {
       success: true,
-      message: "",
+      message: "line 984",
       meta: {}
     }
   };
@@ -1255,7 +1255,7 @@ export const EdgeFirebase = class {
           }
           return sendResponse({
             success: true,
-            message: "",
+            message: "line 1258",
             meta: {}
           });
         } else {
@@ -1333,7 +1333,7 @@ export const EdgeFirebase = class {
       this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1336",
         meta: {}
       });
     } else {
@@ -1376,7 +1376,7 @@ export const EdgeFirebase = class {
               firstRun = false;
               resolve(this.sendResponse({
                 success: true,
-                message: "",
+                message: "startSnapshot " + collectionPath,
                 meta: {}
               }));
             } else { // reject if no items fetched
@@ -1489,7 +1489,7 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1492",
         meta: {}
       });
     } else {
@@ -1520,7 +1520,7 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1523",
         meta: {}
       });
     } else {
@@ -1556,7 +1556,7 @@ export const EdgeFirebase = class {
         });
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 1559",
           meta: {}
         });
       } else {
@@ -1599,7 +1599,7 @@ export const EdgeFirebase = class {
             uid: this.user.uid } );
           return this.sendResponse({
             success: true,
-            message: "",
+            message: "line 1602",
             meta: {}
           });
         } else {
@@ -1634,7 +1634,7 @@ export const EdgeFirebase = class {
       await deleteDoc(doc(this.db, "collection-data", collectionPath.replaceAll("/", "-")));
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1637",
         meta: {}
       });
     } else {
@@ -1679,7 +1679,7 @@ export const EdgeFirebase = class {
 
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 1682",
           meta: {}
         });
       } else {
@@ -1728,7 +1728,7 @@ export const EdgeFirebase = class {
       await updateDoc(doc(this.db, collectionPath, docId), cloneItem);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1731",
         meta: {}
       });
     }
@@ -1751,7 +1751,7 @@ export const EdgeFirebase = class {
     }
     return this.sendResponse({
       success: true,
-      message: "",
+      message: "line 1754",
       meta: {}
     });
   }
@@ -1788,7 +1788,7 @@ export const EdgeFirebase = class {
       await setDoc(doc(this.db, collectionPath, docId), cloneItem);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1791",
         meta: {docId}
       });
     } else {
@@ -1816,7 +1816,7 @@ export const EdgeFirebase = class {
       );
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "1819",
         meta: {docId: docRef.id}
       });
     }
@@ -1839,7 +1839,7 @@ export const EdgeFirebase = class {
       await deleteDoc(doc(this.db, collectionPath, docId));
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1842",
         meta: {}
       });
     } else {
