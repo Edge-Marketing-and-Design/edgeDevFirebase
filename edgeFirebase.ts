@@ -441,7 +441,7 @@ export const EdgeFirebase = class {
         return;
       }
       console.log(result.user.uid);
-      const userRef = doc(this.db, "staged-users", result.user.uid);
+      const userRef = doc(this.db, "users", result.user.uid);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) { 
         this.user.logInError = true;
