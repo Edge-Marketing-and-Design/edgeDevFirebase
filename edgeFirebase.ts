@@ -46,7 +46,10 @@ import {
   OAuthProvider,
   browserPopupRedirectResolver,
   signInWithPopup,
+  signInWithPhoneNumber,
   updateEmail,
+  RecaptchaVerifier,
+  ConfirmationResult,
 } from "firebase/auth";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -85,7 +88,7 @@ interface permissions {
 
 type action = "assign" | "read" | "write" | "delete";
 
-type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple";
+type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple" | "phone";
 
 interface role {
   collectionPath: "-" | string; // - is root
@@ -129,6 +132,8 @@ interface newUser {
 interface userRegister {
   uid?: string;
   email?: string;
+  phoneCode?: string;
+  confirmationResult?: ConfirmationResult;
   password?: string;
   meta: object;
   registrationCode: string;
@@ -209,6 +214,7 @@ export const EdgeFirebase = class {
     } else {
       this.auth = initializeAuth(this.app, { persistence });
     }
+
     if (this.firebaseConfig.emulatorAuth) {
       connectAuthEmulator(this.auth, `http://localhost:${this.firebaseConfig.emulatorAuth}`)
     }
@@ -238,6 +244,10 @@ export const EdgeFirebase = class {
   private anaytics = null;
 
   private functions = null;
+
+  public createRecaptchaVerifier = (containerId, parameters = { size: 'invisible' }) => {
+    return new RecaptchaVerifier(containerId, parameters, this.auth);
+  }
 
   public runFunction = async (functionName: string, data: Record<string, unknown>) => {
     data.uid = this.user.uid;
@@ -497,6 +507,28 @@ export const EdgeFirebase = class {
     }
   }
 
+  public sendPhoneCode = async (phone: string): Promise<any> => {
+    const newDiv = document.createElement("div");
+    newDiv.setAttribute("id", "recaptcha-container");
+    document.body.appendChild(newDiv);
+
+    const recaptchaVerifier = new RecaptchaVerifier("recaptcha-container", {
+      'size': 'invisible',
+      'callback': (response) => {
+        console.log(response)
+      }
+    }, this.auth);
+
+    try {
+      const confirmationResult = await signInWithPhoneNumber(this.auth, phone, recaptchaVerifier);
+      return confirmationResult 
+    } catch (error) {
+      return error
+    }
+  }
+
+
+
   public registerUser = async (
     userRegister: userRegister,
     authProvider: authProviders = "email",
@@ -542,6 +574,16 @@ export const EdgeFirebase = class {
           }
         } else if (authProvider === "microsoft") {
          response = await this.registerUserWithMicrosoft(providerScopes);
+        } else if (authProvider === "phone") {
+          // Try to sign in with the code
+          try {
+            response = await userRegister.confirmationResult.confirm(userRegister.phoneCode);
+          } catch (error) {
+            // Handle the case where the code is incorrect or expired
+            response = error;
+          }
+              
+        
         }
         if (!Object.prototype.hasOwnProperty.call(response, "user")) { 
           return this.sendResponse({
