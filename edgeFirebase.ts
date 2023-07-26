@@ -246,10 +246,6 @@ export const EdgeFirebase = class {
 
   private functions = null;
 
-  public createRecaptchaVerifier = (containerId, parameters = { size: 'invisible' }) => {
-    return new RecaptchaVerifier(containerId, parameters, this.auth);
-  }
-
   public runFunction = async (functionName: string, data: Record<string, unknown>) => {
     data.uid = this.user.uid;
     const callable = httpsCallable(this.functions, functionName);
@@ -422,6 +418,8 @@ export const EdgeFirebase = class {
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
+      const oldDiv = document.getElementById("recaptcha-container");
+      if (oldDiv) oldDiv.remove();
       if (userAuth) {
         this.user.loggingIn = true;
         this.user.email = userAuth.email;
@@ -444,7 +442,10 @@ export const EdgeFirebase = class {
   };
 
   public logInWithPhone = async (confirmationResult: ConfirmationResult, phoneCode: string): Promise<void> => {
+    const oldDiv = document.getElementById("recaptcha-container");
+    if (oldDiv) oldDiv.remove();
     try {
+      console.log(confirmationResult)
       const result = await confirmationResult.confirm(phoneCode);
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
         this.user.logInError = true;
@@ -459,11 +460,13 @@ export const EdgeFirebase = class {
         this.user.logInError = true;
         this.user.logInErrorMessage = "User does not exist";
         this.logOut();
+        return;
       }
     } catch (error) {
       this.user.logInError = true;
       this.user.logInErrorMessage = error.message;
       this.logOut();
+      return;
     }
   };
 
@@ -533,6 +536,9 @@ export const EdgeFirebase = class {
   }
 
   public sendPhoneCode = async (phone: string): Promise<any> => {
+    const oldDiv = document.getElementById("recaptcha-container");
+    if (oldDiv) oldDiv.remove();
+
     const newDiv = document.createElement("div");
     newDiv.setAttribute("id", "recaptcha-container");
     document.body.appendChild(newDiv);
@@ -548,7 +554,10 @@ export const EdgeFirebase = class {
       const confirmationResult = await signInWithPhoneNumber(this.auth, phone, recaptchaVerifier);
       return confirmationResult 
     } catch (error) {
-      return error
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return false;
     }
   }
 
@@ -600,7 +609,8 @@ export const EdgeFirebase = class {
         } else if (authProvider === "microsoft") {
          response = await this.registerUserWithMicrosoft(providerScopes);
         } else if (authProvider === "phone") {
-          // Try to sign in with the code
+          const oldDiv = document.getElementById("recaptcha-container");
+          if (oldDiv) oldDiv.remove();
           try {
             response = await userRegister.confirmationResult.confirm(userRegister.phoneCode);
           } catch (error) {
