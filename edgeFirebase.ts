@@ -50,6 +50,7 @@ import {
   updateEmail,
   RecaptchaVerifier,
   ConfirmationResult,
+  PhoneAuthProvider,
 } from "firebase/auth";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -440,6 +441,30 @@ export const EdgeFirebase = class {
         this.user.loggingIn = false;
       }
     });
+  };
+
+  public logInWithPhone = async (confirmationResult: ConfirmationResult, phoneCode: string): Promise<void> => {
+    try {
+      const result = await confirmationResult.confirm(phoneCode);
+      if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+        this.user.logInError = true;
+        this.user.logInErrorMessage = JSON.stringify(result)
+        this.logOut();
+        return;
+      }
+      console.log(result.user.uid);
+      const userRef = doc(this.db, "users", result.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) { 
+        this.user.logInError = true;
+        this.user.logInErrorMessage = "User does not exist";
+        this.logOut();
+      }
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+    }
   };
 
   public logInWithMicrosoft = async (providerScopes: string[] = []): Promise<void> => {
@@ -1050,6 +1075,7 @@ export const EdgeFirebase = class {
       this.user.stagedDocId = null;
     })
   };
+
 
   public logIn = (credentials: Credentials): void => {
     this.logOut();
