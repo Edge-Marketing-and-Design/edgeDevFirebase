@@ -1391,28 +1391,52 @@ export const EdgeFirebase = class {
     collectionPath: string,
     docId: string
   ): Promise<actionResponse> => {
-    // console.log(collectionPath)
-    // console.log(docId)
     const canRead = await this.permissionCheck("read", collectionPath + '/' + docId);
     this.data[collectionPath + '/' + docId] = {};
     this.stopSnapshot(collectionPath + '/' + docId);
     this.unsubscibe[collectionPath + '/' + docId] = null;
     if (canRead) {
       const docRef = doc(this.db, collectionPath, docId);
-      const unsubscribe = onSnapshot(docRef, (doc) => {
-        if (doc.exists()) {
-          const item = doc.data();
-          item.docId = doc.id;
-          this.data[collectionPath + '/' + docId] = item;
-        } else {
-          this.data[collectionPath + '/' + docId] = {};
-        }
-      });
-      this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
-      return this.sendResponse({
-        success: true,
-        message: "line 1336",
-        meta: {}
+      
+      return new Promise<actionResponse>((resolve, reject) => {
+        let firstRun = true;
+        const unsubscribe = onSnapshot(docRef, (doc) => {
+          if (doc.exists()) {
+            const item = doc.data();
+            item.docId = doc.id;
+            this.data[collectionPath + '/' + docId] = item;
+
+            // Only resolve the Promise on first run of onSnapshot if document exists
+            if(firstRun) {
+              firstRun = false;
+              resolve(this.sendResponse({
+                success: true,
+                message: "startDocumentSnapshot " + collectionPath + '/' + docId,
+                meta: {}
+              }));
+            }
+          } else {
+            this.data[collectionPath + '/' + docId] = {};
+
+            // Resolve the Promise with failure response if no document exists
+            if(firstRun) {
+              firstRun = false;
+              resolve(this.sendResponse({
+                success: false,
+                message: `No document found in "${collectionPath}/${docId}"`,
+                meta: {}
+              }));
+            }
+          }
+        }, (error) => {
+          // Reject the Promise with the error response
+          reject(this.sendResponse({
+            success: false,
+            message: `Error fetching document from "${collectionPath}/${docId}": ${error.message}`,
+            meta: {}
+          }));
+        });
+        this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
       });
     } else {
       return this.sendResponse({
@@ -1422,6 +1446,7 @@ export const EdgeFirebase = class {
       });
     }
   };
+
 
   public startSnapshot = async (
     collectionPath: string,
