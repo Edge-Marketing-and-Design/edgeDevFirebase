@@ -47,10 +47,13 @@ import {
   browserPopupRedirectResolver,
   signInWithPopup,
   signInWithPhoneNumber,
+  sendSignInLinkToEmail,
   updateEmail,
   RecaptchaVerifier,
   ConfirmationResult,
   PhoneAuthProvider,
+  signInWithCustomToken,
+  updateProfile,
 } from "firebase/auth";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -89,7 +92,7 @@ interface permissions {
 
 type action = "assign" | "read" | "write" | "delete";
 
-type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple" | "phone";
+type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple" | "phone" | "emailLink" | "customToken";
 
 interface role {
   collectionPath: "-" | string; // - is root
@@ -133,8 +136,10 @@ interface newUser {
 interface userRegister {
   uid?: string;
   email?: string;
+  token?: string;
+  identifier?: string;
   phoneCode?: string;
-  confirmationResult?: ConfirmationResult;
+  phoneNumber?: string;
   password?: string;
   meta: object;
   registrationCode: string;
@@ -441,24 +446,53 @@ export const EdgeFirebase = class {
     });
   };
 
-  public logInWithPhone = async (confirmationResult: ConfirmationResult, phoneCode: string): Promise<void> => {
-    const oldDiv = document.getElementById("recaptcha-container");
-    if (oldDiv) oldDiv.remove();
+  public loginWithCustomToken = async (token: string): Promise<void> => {
     try {
-      console.log(confirmationResult)
-      const result = await confirmationResult.confirm(phoneCode);
+      const result = await signInWithCustomToken(this.auth, token);
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
         this.user.logInError = true;
         this.user.logInErrorMessage = JSON.stringify(result)
         this.logOut();
         return;
       }
-      console.log(result.user.uid);
       const userRef = doc(this.db, "users", result.user.uid);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) { 
         this.user.logInError = true;
         this.user.logInErrorMessage = "User does not exist";
+        this.logOut();
+        return;
+      }
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return;
+    }
+  }
+
+  public logInWithPhone = async (phoneNumber: string, phoneCode: string): Promise<void> => {
+    try {
+      const verifyCode: any = await this.runFunction("verifyPhoneNumber", {phone: phoneNumber, code: phoneCode});
+      if (verifyCode.data.success) {
+        const result = await signInWithCustomToken(this.auth, verifyCode.data.token);
+        if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+          this.user.logInError = true;
+          this.user.logInErrorMessage = JSON.stringify(result)
+          this.logOut();
+          return;
+        }
+        const userRef = doc(this.db, "users", result.user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) { 
+          this.user.logInError = true;
+          this.user.logInErrorMessage = "User does not exist";
+          this.logOut();
+          return;
+        }
+      } else {
+        this.user.logInError = true;
+        this.user.logInErrorMessage = verifyCode.data.error;
         this.logOut();
         return;
       }
@@ -535,24 +569,37 @@ export const EdgeFirebase = class {
     }
   }
 
-  public sendPhoneCode = async (phone: string): Promise<any> => {
-    const oldDiv = document.getElementById("recaptcha-container");
-    if (oldDiv) oldDiv.remove();
-
-    const newDiv = document.createElement("div");
-    newDiv.setAttribute("id", "recaptcha-container");
-    document.body.appendChild(newDiv);
-
-    const recaptchaVerifier = new RecaptchaVerifier("recaptcha-container", {
-      'size': 'invisible',
-      'callback': (response) => {
-        console.log(response)
-      }
-    }, this.auth);
-
+  public sendEmailLink = async (email: string): Promise<any> => {
+    const actionCodeSettings = {
+      url: window.location.href,
+      handleCodeInApp: true,
+    };
     try {
-      const confirmationResult = await signInWithPhoneNumber(this.auth, phone, recaptchaVerifier);
-      return confirmationResult 
+      await sendSignInLinkToEmail(this.auth, email, actionCodeSettings);
+      return true;
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return false;
+    }
+  };
+
+  public sendPhoneCode = async (phone: string): Promise<any> => {
+    try {
+      const callable = httpsCallable(this.functions, "sendVerificationCode");
+      const result: any = await callable({phone: phone});
+
+      if (result.data.success !== false) {
+        console.log('good')
+        return result.data;
+      } else  {
+        console.log('bad')
+        this.user.logInError = true;
+        this.user.logInErrorMessage = result.data.error;
+        this.logOut();
+        return false;
+      }
     } catch (error) {
       this.user.logInError = true;
       this.user.logInErrorMessage = error.message;
@@ -608,17 +655,50 @@ export const EdgeFirebase = class {
           }
         } else if (authProvider === "microsoft") {
          response = await this.registerUserWithMicrosoft(providerScopes);
-        } else if (authProvider === "phone") {
-          const oldDiv = document.getElementById("recaptcha-container");
-          if (oldDiv) oldDiv.remove();
+        } else if (authProvider === "customToken") {
+          if (!Object.prototype.hasOwnProperty.call(userRegister, 'token')) {
+            return this.sendResponse({
+              success: false,
+              message: "Token is required for registration when authProvider is customToken.",
+              meta: {}
+            });
+          }
+          if (!Object.prototype.hasOwnProperty.call(userRegister, 'identifier')) {
+            return this.sendResponse({
+              success: false,
+              message: "Identifier is required for registration when authProvider is customToken.",
+              meta: {}
+            });
+          }
           try {
-            response = await userRegister.confirmationResult.confirm(userRegister.phoneCode);
+            response = await signInWithCustomToken(this.auth, userRegister.token);
+            await updateProfile(response.user, {
+              displayName: userRegister.identifier
+            });
+          } catch (error) {
+            response = error;
+          }
+        } else if (authProvider === "phone") {
+          try {
+            const verifyCode: any = await this.runFunction("verifyPhoneNumber", {phone: userRegister.phoneNumber, code: userRegister.phoneCode});
+            if (verifyCode.data.success) {
+              response = await signInWithCustomToken(this.auth, verifyCode.data.token);
+              await updateProfile(response.user, {
+                displayName: userRegister.phoneNumber
+              });
+            } else {
+              return this.sendResponse({
+                success: false,
+                message: verifyCode.data.error,
+                meta: {}
+              });
+            }
           } catch (error) {
             // Handle the case where the code is incorrect or expired
             response = error;
           }
-              
-        
+        } else if (authProvider === "emailLink") {
+          // TOOD: emailLink stuff
         }
         if (!Object.prototype.hasOwnProperty.call(response, "user")) { 
           return this.sendResponse({
@@ -627,14 +707,13 @@ export const EdgeFirebase = class {
             meta: {}
           });
         }
-
+        
         let metaUpdate = {};
         if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
           metaUpdate = userRegister.meta;
         }else{
           metaUpdate = user.meta;
         }
-
         let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
         if (user.isTemplate) {
           stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, meta: user.meta, templateMeta: metaUpdate}

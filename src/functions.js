@@ -1,5 +1,87 @@
 // START @edge/firebase functions
 
+const twilio = require('twilio')
+const authToken = functions.config().twilio.auth_token
+const accountSid = functions.config().twilio.sid
+const systemNumber = functions.config().twilio.system_number
+
+function formatPhoneNumber(phone) {
+  // Remove non-numeric characters from the phone number
+  const numericPhone = phone.replace(/\D/g, '')
+  // Return the formatted number
+  return `+1${numericPhone}`
+}
+
+exports.sendVerificationCode = functions.https.onCall(async (data, context) => {
+  const code = (Math.floor(Math.random() * 1000000) + 1000000).toString().substring(1)
+  const phone = formatPhoneNumber(data.phone)
+
+  try {
+    const client = twilio(accountSid, authToken)
+    await client.messages.create({
+      body: `Your verification code is: ${code}`,
+      to: phone, // the user's phone number
+      from: systemNumber, // your Twilio phone number from the configuration
+    })
+  }
+  catch (error) {
+    console.log(error)
+    return { success: false, error: 'Invalid Phone #' }
+  }
+
+  try {
+    // Use the formatted phone number as the document ID for Firestore
+    await db.collection('phone-auth').doc(phone).set({
+      phone,
+      code,
+    })
+    return phone
+  }
+  catch (error) {
+    return { success: false, error }
+  }
+})
+
+exports.verifyPhoneNumber = functions.https.onCall(async (data, context) => {
+  const phone = data.phone
+  const code = data.code
+
+  // Get the phone-auth document with the given phone number
+  const phoneDoc = await db.collection('phone-auth').doc(phone).get()
+
+  if (!phoneDoc.exists) {
+    return { success: false, error: 'Phone number not found.' }
+  }
+
+  const storedCode = phoneDoc.data().code
+
+  if (storedCode !== code) {
+    return { success: false, error: 'Invalid verification code.' }
+  }
+
+  // If the code matches, authenticate the user with Firebase Custom Auth
+  try {
+    // You would typically generate a UID based on the phone number or another system
+    const uid = phone
+
+    // Create a custom token (this can be used on the client to sign in)
+    const customToken = await admin.auth().createCustomToken(uid)
+
+    return { success: true, token: customToken }
+  }
+  catch (error) {
+    console.error('Error creating custom token:', error)
+    return { success: false, error: 'Failed to authenticate.' }
+  }
+})
+
+// // Generate custom token example:
+// exports.generateCustomToken = functions.https.onCall(async (data, context) => {
+//   // You would want to have some sort of validation here
+//   const token = await admin.auth().createCustomToken(data.customUid)
+//   return { token }
+// })
+
 exports.initFirestore = functions.https.onCall(async (data, context) => {
   // checks to see of the collections 'collection-data' and 'staged-users' exist if not will seed them with data
   const collectionData = await db.collection('collection-data').get()
