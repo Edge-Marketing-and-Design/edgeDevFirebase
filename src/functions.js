@@ -201,68 +201,75 @@ exports.currentUserRegister = functions.https.onCall(async (data, context) => {
   }
 })
 
-exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate((change, context) => {
+exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate(async (change, context) => {
   const eventId = context.eventId
   const eventRef = db.collection('events').doc(eventId)
   const stagedDocId = context.params.docId
   let newData = change.after.data()
   const oldData = change.before.data()
-  return shouldProcess(eventRef).then((process) => {
-    if (process) {
-      // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
-      if (newData.userId) {
-        const userRef = db.collection('users').doc(newData.userId)
-        setUser(userRef, newData, oldData, stagedDocId).then(() => {
-          return markProcessed(eventRef)
-        })
+
+  const shouldProcess = await eventRef.get().then((eventDoc) => {
+    return !eventDoc.exists || !eventDoc.data().processed
+  })
+
+  if (!shouldProcess) {
+    return null
+  }
+
+  // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
+  if (newData.userId) {
+    const userRef = db.collection('users').doc(newData.userId)
+    await setUser(userRef, newData, oldData, stagedDocId)
+    await markProcessed(eventRef)
+  }
+  else {
+    if (newData.templateUserId !== oldData.templateUserId) {
+      // Check if templateUserId already exists in the staged-users collection
+      const stagedUserRef = db.collection('staged-users').doc(newData.templateUserId)
+      const doc = await stagedUserRef.get()
+
+      // If it exists, skip the creation process
+      if (doc.exists) {
+        return null
+      }
+
+      newData.isTemplate = false
+      const templateUserId = newData.templateUserId
+      newData.meta = newData.templateMeta
+      delete newData.templateMeta
+      delete newData.templateUserId
+      if (Object.prototype.hasOwnProperty.call(newData, 'subCreate') && Object.values(newData.subCreate).length > 0) {
+        const subCreate = newData.subCreate
+        delete newData.subCreate
+        const addedDoc = await db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue })
+        await db.collection(subCreate.rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
+        delete newData.dynamicDocumentFieldValue
+        const newRole = { [`${subCreate.rootPath}-${addedDoc.id}`]: { collectionPath: `${subCreate.rootPath}-${addedDoc.id}`, role: subCreate.role } }
+        if (Object.prototype.hasOwnProperty.call(newData, 'collectionPaths')) {
+          newData.collectionPaths.push(`${subCreate.rootPath}-${addedDoc.id}`)
+        }
+        else {
+          newData.collectionPaths = [`${subCreate.rootPath}-${addedDoc.id}`]
+        }
+        const newRoles = { ...newData.roles, ...newRole }
+        newData = { ...newData, roles: newRoles }
+        const stagedUserRef = db.collection('staged-users').doc(templateUserId)
+        await stagedUserRef.set({ ...newData, userId: templateUserId })
+        const userRef = db.collection('users').doc(templateUserId)
+        await setUser(userRef, newData, oldData, templateUserId)
+        await markProcessed(eventRef)
       }
       else {
-        if (newData.templateUserId !== oldData.templateUserId) {
-          newData.isTemplate = false
-          const templateUserId = newData.templateUserId
-          newData.meta = newData.templateMeta
-          delete newData.templateMeta
-          delete newData.templateUserId
-          if (Object.prototype.hasOwnProperty.call(newData, 'subCreate') && Object.values(newData.subCreate).length > 0) {
-            const subCreate = newData.subCreate
-            delete newData.subCreate
-            db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue }).then((addedDoc) => {
-              db.collection(subCreate.rootPath).doc(addedDoc.id).update({ docId: addedDoc.id }).then(() => {
-                delete newData.dynamicDocumentFieldValue
-                const newRole = { [`${subCreate.rootPath}-${addedDoc.id}`]: { collectionPath: `${subCreate.rootPath}-${addedDoc.id}`, role: subCreate.role } }
-                if (Object.prototype.hasOwnProperty.call(newData, 'collectionPaths')) {
-                  newData.collectionPaths.push(`${subCreate.rootPath}-${addedDoc.id}`)
-                }
-                else {
-                  newData.collectionPaths = [`${subCreate.rootPath}-${addedDoc.id}`]
-                }
-                const newRoles = { ...newData.roles, ...newRole }
-                newData = { ...newData, roles: newRoles }
-                const stagedUserRef = db.collection('staged-users').doc(templateUserId)
-                return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
-                  const userRef = db.collection('users').doc(templateUserId)
-                  setUser(userRef, newData, oldData, templateUserId).then(() => {
-                    return markProcessed(eventRef)
-                  })
-                })
-              })
-            })
-          }
-          else {
-            const stagedUserRef = db.collection('staged-users').doc(templateUserId)
-            return stagedUserRef.set({ ...newData, userId: templateUserId }).then(() => {
-              const userRef = db.collection('users').doc(templateUserId)
-              setUser(userRef, newData, oldData, templateUserId).then(() => {
-                return markProcessed(eventRef)
-              })
-            })
-          }
-        }
+        const stagedUserRef = db.collection('staged-users').doc(templateUserId)
+        await stagedUserRef.set({ ...newData, userId: templateUserId })
+        const userRef = db.collection('users').doc(templateUserId)
+        await setUser(userRef, newData, oldData, templateUserId)
+        await markProcessed(eventRef)
       }
-      return markProcessed(eventRef)
     }
-  })
-})
+  }
+  await markProcessed(eventRef)
+}
 
 function setUser(userRef, newData, oldData, stagedDocId) {
 // IT's OK If "users" doesn't match exactly matched "staged-users" because this is only preventing
