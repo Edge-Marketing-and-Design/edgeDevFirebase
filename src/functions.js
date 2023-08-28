@@ -269,7 +269,7 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
     }
   }
   await markProcessed(eventRef)
-}
+})
 
 function setUser(userRef, newData, oldData, stagedDocId) {
 // IT's OK If "users" doesn't match exactly matched "staged-users" because this is only preventing
