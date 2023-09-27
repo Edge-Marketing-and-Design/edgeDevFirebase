@@ -231,6 +231,12 @@ service cloud.firestore {
           let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
           let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
           return !(collectionPath in skipPaths) &&
+                 !(permissionCheck == "write" && 
+                    (
+                      ("stripeCustomerId" in request.resource.data && (!("stripeCustomerId" in resource.data) || resource.data.stripeCustomerId != request.resource.data.stripeCustomerId)) ||
+                      ("stripeSubscription" in request.resource.data && (!("stripeSubscription" in resource.data) || resource.data.stripeSubscription != request.resource.data.stripeSubscription))
+                    )
+                  ) &&
                   request.auth != null &&
                   collectionPath in ruleHelper &&
                   "permissionCheckPath" in ruleHelper[collectionPath] &&
