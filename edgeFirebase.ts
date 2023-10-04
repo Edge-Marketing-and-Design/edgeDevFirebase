@@ -473,7 +473,7 @@ export const EdgeFirebase = class {
 
   public logInWithPhone = async (phoneNumber: string, phoneCode: string): Promise<void> => {
     try {
-      const verifyCode: any = await this.runFunction("verifyPhoneNumber", {phone: phoneNumber, code: phoneCode});
+      const verifyCode: any = await this.runFunction("edgeFirebase-verifyPhoneNumber", {phone: phoneNumber, code: phoneCode});
       if (verifyCode.data.success) {
         const result = await signInWithCustomToken(this.auth, verifyCode.data.token);
         if (!Object.prototype.hasOwnProperty.call(result, "user")) {
@@ -552,7 +552,7 @@ export const EdgeFirebase = class {
       });
     }
     // userRegister.uid = this.user.uid;
-    const result = await this.runFunction("currentUserRegister", userRegister as unknown as Record<string, unknown>);
+    const result = await this.runFunction("edgeFirebase-currentUserRegister", userRegister as unknown as Record<string, unknown>);
     const resultData = result.data as {success: boolean, message: string};
     if (resultData.success) {
       return this.sendResponse({
@@ -680,7 +680,7 @@ export const EdgeFirebase = class {
           }
         } else if (authProvider === "phone") {
           try {
-            const verifyCode: any = await this.runFunction("verifyPhoneNumber", {phone: userRegister.phoneNumber, code: userRegister.phoneCode});
+            const verifyCode: any = await this.runFunction("edgeFirebase-verifyPhoneNumber", {phone: userRegister.phoneNumber, code: userRegister.phoneCode});
             if (verifyCode.data.success) {
               response = await signInWithCustomToken(this.auth, verifyCode.data.token);
               await updateProfile(response.user, {
@@ -854,7 +854,7 @@ export const EdgeFirebase = class {
       }
     }
     if (removedFrom.length > 0) {
-      const response = await this.runFunction("removeNonRegisteredUser", {uid: this.user.uid, docId});
+      const response = await this.runFunction("edgeFirebase-removeNonRegisteredUser", {uid: this.user.uid, docId});
       return this.sendResponse({
         success: true,
         message: "line 704",

@@ -24,11 +24,19 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
 
 if [ ! -f "$project_root/functions/index.js" ]; then
   mkdir -p "$project_root/functions"
-  echo "const functions = require('firebase-functions')" > "$project_root/functions/index.js";
-  echo "const admin = require('firebase-admin')" >> "$project_root/functions/index.js";
-  echo "admin.initializeApp()" >> "$project_root/functions/index.js";
-  echo "const db = admin.firestore()" >> "$project_root/functions/index.js";
-fi   
+  echo "require('dotenv').config({ path: process.env.NODE_ENV === 'production' ? '.env.prod' : '.env.dev' })" > "$project_root/functions/index.js";
+fi
+
+cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
+cp ./src/config.js "$project_root/functions/config.js"
+
+if [ ! -f "$project_root/.env.dev" ]; then
+  cp ./src/.env.dev "$project_root/.env.dev"
+fi
+
+if [ ! -f "$project_root/.env.prod" ]; then
+  cp ./src/.env.prod "$project_root/.env.prod"
+fi
 
 [ "$(tail -c1 $project_root/functions/index.js)" != "" ] && echo "" >> "$project_root/functions/index.js"
 
