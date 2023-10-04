@@ -144,6 +144,7 @@ interface userRegister {
   meta: object;
   registrationCode: string;
   dynamicDocumentFieldValue?: string;
+  requestedOrgId?: string;
 }
 
 
@@ -622,6 +623,18 @@ export const EdgeFirebase = class {
         meta: {}
       });
     }
+    if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
+      if (userRegister.requestedOrgId) {
+        const result: any = await this.runFunction("edgeFirebase-checkOrgIdExists", {orgId: userRegister.requestedOrgId.toLowerCase()});
+        if (result.data.exists) {
+          return this.sendResponse({
+            success: false,
+            message: "Organization ID already exists.",
+            meta: {}
+          });
+        }
+      }
+    }
     const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
     const userSnap = await getDoc(userRef);
     if (userSnap.exists()) {
@@ -714,11 +727,14 @@ export const EdgeFirebase = class {
         }else{
           metaUpdate = user.meta;
         }
-        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
+        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown, requestedOrgId?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
         if (user.isTemplate) {
           stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, meta: user.meta, templateMeta: metaUpdate}
           if (Object.prototype.hasOwnProperty.call(userRegister, 'dynamicDocumentFieldValue')) {
             stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate}
+          }
+          if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
+            stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate, requestedOrgId: userRegister.requestedOrgId.toLowerCase()}
           }
         }
         const initRoleHelper = {uid: response.user.uid}
