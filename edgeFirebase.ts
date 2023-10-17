@@ -110,7 +110,7 @@ interface UserDataObject {
   firebaseUser: object;
   oAuthCredential: { accessToken: string; idToken: string;}
   loggedIn: boolean;
-  loggingIn: boolean;
+  loggingIn: boolean | null;
   logInError: boolean;
   logInErrorMessage: string;
   meta: object;
@@ -424,6 +424,7 @@ export const EdgeFirebase = class {
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
+      console.log('onAuthStateChanged')
       const oldDiv = document.getElementById("recaptcha-container");
       if (oldDiv) oldDiv.remove();
       if (userAuth) {
@@ -1222,7 +1223,7 @@ export const EdgeFirebase = class {
   public user: UserDataObject = reactive({
     uid: null,
     email: "",
-    loggingIn: false,
+    loggingIn: null,
     loggedIn: false,
     logInError: false,
     logInErrorMessage: "",   
