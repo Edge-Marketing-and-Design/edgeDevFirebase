@@ -1668,6 +1668,30 @@ export const EdgeFirebase = class {
             this.state.users = items;
           });
           this.unsubscibe["staged-users"] = unsubscibe;
+        } else {
+          const q = query(
+            collection(this.db, "public-users"),
+            where(
+              "collectionPaths",
+              "array-contains",
+              collectionPath.replaceAll('/', '-')
+            )
+          )
+          const unsubscibe = await onSnapshot(q, (querySnapshot) => {
+            const items = {};
+            querySnapshot.forEach((doc) => {
+              const user = doc.data();
+              const docId = doc.id;
+              const item = {
+                docId,
+                meta: user.meta,
+                userId: user.userId,
+              }
+              items[doc.id] = item;
+            });
+            this.state.users = items;
+          });
+          this.unsubscibe["staged-users"] = unsubscibe;
         }
       }
     };

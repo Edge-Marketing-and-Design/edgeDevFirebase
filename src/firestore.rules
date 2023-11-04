@@ -1,8 +1,17 @@
+rules_version = '2';
 // #EDGE FIREBASE RULES START
 service cloud.firestore {
 
   match /databases/{database}/documents/phone-auth/{phone} {
     allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+
+  match /databases/{database}/documents/public-users/{user} {
+    allow read: if true;
+    allow list: if true;
     allow create: if false;  
     allow update: if false; 
     allow delete: if false; 
@@ -228,7 +237,7 @@ service cloud.firestore {
       }
       function checkPermission(collectionPath, permissionCheck) {
           let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
+          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers", "phone-auth", "public-users"];
           let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
           return !(collectionPath in skipPaths) &&
                  !(permissionCheck == "write" && 
@@ -303,4 +312,4 @@ service cloud.firestore {
       }
     }
   }
-  // #EDGE FIREBASE RULES END
+// #EDGE FIREBASE RULES END

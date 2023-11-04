@@ -277,6 +277,12 @@ function setUser(userRef, newData, oldData, stagedDocId) {
   return userRef.get().then((user) => {
     let userUpdate = { meta: newData.meta, stagedDocId }
 
+    if (newData.meta && newData.meta.name) {
+      const publicUserRef = db.collection('public-users').doc(newData.userId)
+      const publicMeta = { name: newData.meta.name }
+      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.userId })
+    }
+
     if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
       userUpdate = { ...userUpdate, roles: newData.roles }
     }
