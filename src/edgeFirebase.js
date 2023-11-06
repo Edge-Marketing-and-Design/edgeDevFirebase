@@ -1,3 +1,7 @@
+// TODO: THE permissionCheck will call a cloud function that will check the user's permissions also...
+// This could function will right to "rules-helpers" collction a document with the user's uid and the collection path and the permission
+// This will make the rules far more efficient and will allow for more complex rules // this only needs done really for snapshots... 
+// All the other document reads and writes should be made using a cloud functions exclusively and the cloud function will check the permissions
 const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
@@ -278,9 +282,9 @@ function setUser(userRef, newData, oldData, stagedDocId) {
     let userUpdate = { meta: newData.meta, stagedDocId }
 
     if (newData.meta && newData.meta.name) {
-      const publicUserRef = db.collection('public-users').doc(newData.userId)
+      const publicUserRef = db.collection('public-users').doc(newData.uid)
       const publicMeta = { name: newData.meta.name }
-      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.userId })
+      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.uid })
     }
 
     if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
