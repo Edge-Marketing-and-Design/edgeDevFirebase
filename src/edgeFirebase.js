@@ -1,8 +1,4 @@
-// TODO: THE permissionCheck will call a cloud function that will check the user's permissions also...
-// This could function will right to "rules-helpers" collction a document with the user's uid and the collection path and the permission
-// This will make the rules far more efficient and will allow for more complex rules // this only needs done really for snapshots... 
-// All the other document reads and writes should be made using a cloud functions exclusively and the cloud function will check the permissions
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db } = require('./config.js')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, pubsub } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
@@ -14,6 +10,52 @@ function formatPhoneNumber(phone) {
   // Return the formatted number
   return `+1${numericPhone}`
 }
+
+exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
+  const queuedTopicsRef = db.collection('topic-queue')
+  const snapshot = await queuedTopicsRef.get()
+
+  for (const doc of snapshot.docs) {
+    await db.runTransaction(async (transaction) => {
+      const docSnapshot = await transaction.get(doc.ref)
+      if (!docSnapshot.exists) {
+        throw new Error('Document does not exist!')
+      }
+      const emailData = docSnapshot.data()
+      const emailTimestamp = emailData.timestamp ? emailData.timestamp.toMillis() : 0
+      const delayTimestamp = emailData.minuteDelay ? emailTimestamp + emailData.minuteDelay * 60 * 1000 : 0
+      const currentTimestamp = Date.now()
+      // Check if current time is beyond the timestamp + minuteDelay, or if timestamp or minuteDelay is not set
+      if (emailTimestamp > currentTimestamp || currentTimestamp >= delayTimestamp || !emailData.timestamp || !emailData.minuteDelay) {
+        // Check if topic and payload exist and are not empty
+        if (emailData.topic && emailData.payload && emailData.topic.trim() !== '' && emailData.payload.trim() !== '') {
+          try {
+            await pubsub.topic(emailData.topic).publishMessage({ data: Buffer.from(JSON.stringify(emailData.payload)) })
+            // Delete the document after successfully publishing the message
+            transaction.delete(doc.ref)
+          }
+          catch (error) {
+            console.error(`Error publishing message to topic ${emailData.topic}:`, error)
+            // Increment retry count and set new delay
+            const retryCount = emailData.retry ? emailData.retry + 1 : 1
+            if (retryCount <= 3) {
+              const minuteDelay = retryCount === 1 ? 1 : retryCount === 2 ? 10 : 30
+              transaction.update(doc.ref, { retry: retryCount, minuteDelay })
+            }
+            else {
+              // Delete the document if there was an error publishing the topic after 3 retries
+              transaction.delete(doc.ref)
+            }
+          }
+        }
+        // Delete the document if topic or payload does not exist or is empty
+        else {
+          transaction.delete(doc.ref)
+        }
+      }
+    })
+  }
+})
 
 exports.sendVerificationCode = functions.https.onCall(async (data, context) => {
   const code = (Math.floor(Math.random() * 1000000) + 1000000).toString().substring(1)
@@ -282,9 +324,9 @@ function setUser(userRef, newData, oldData, stagedDocId) {
     let userUpdate = { meta: newData.meta, stagedDocId }
 
     if (newData.meta && newData.meta.name) {
-      const publicUserRef = db.collection('public-users').doc(newData.uid)
+      const publicUserRef = db.collection('public-users').doc(newData.userId)
       const publicMeta = { name: newData.meta.name }
-      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.uid })
+      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.userId })
     }
 
     if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {

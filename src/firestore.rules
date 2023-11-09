@@ -9,6 +9,14 @@ service cloud.firestore {
     allow delete: if false; 
   }
 
+  match /databases/{database}/documents/topic-queue/{topic} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+
+
   match /databases/{database}/documents/public-users/{user} {
     allow read: if request.auth != null;
     allow list: if request.auth != null;
@@ -16,7 +24,7 @@ service cloud.firestore {
     allow update: if false; 
     allow delete: if false; 
   }
-  
+
   match /databases/{database}/documents/events/{event} {
     allow read: if false;
     allow create: if false;  
@@ -237,7 +245,7 @@ service cloud.firestore {
       }
       function checkPermission(collectionPath, permissionCheck) {
           let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers", "phone-auth", "public-users"];
+          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers", "phone-auth", "public-users", "topic-queue"];
           let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
           return !(collectionPath in skipPaths) &&
                  !(permissionCheck == "write" && 
