@@ -400,9 +400,14 @@ export const EdgeFirebase = class {
     this.unsubscibe['collection-data'] = unsubscribe
   }
 
-
+  private ruleHelperReset = async (): Promise<void> => {
+    const initRoleHelper = { uid: this.user.uid, 'edge-assignment-helper': {permissionType: "roles"} }
+    this.state.ruleHelpers['edge-assignment-helper'] = {permissionType: "roles"}
+    await setDoc(doc(this.db, "rule-helpers", this.user.uid), initRoleHelper);
+  }
 
   private startUserMetaSync = async (docSnap): Promise<void> => {
+    await this.ruleHelperReset();
     await this.startCollectionPermissionsSync()
     await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
@@ -977,7 +982,12 @@ export const EdgeFirebase = class {
     }
     let index = collection.length;
     const ruleCheck: RuleCheck =  { permissionType: "", permissionCheckPath: "", fullPath: collectionPath.replaceAll("/", "-"), action };
-   
+    if (this.state.ruleHelpers[ruleKey]) {
+      const existingRuleHelper = this.state.ruleHelpers[ruleKey];
+      if (existingRuleHelper.fullPath === ruleCheck.fullPath && existingRuleHelper.action === ruleCheck.action) {
+        return;
+      }
+    }
     while (index > 0) {
       const collectionArray = JSON.parse(JSON.stringify(collection));
       const permissionCheck = collectionArray.splice(0, index).join("-");
@@ -1017,6 +1027,7 @@ export const EdgeFirebase = class {
     }
     const check = {[ruleKey]: ruleCheck,  uid: this.user.uid };
     await setDoc(doc(this.db, "rule-helpers", this.user.uid), check, { merge: true });
+    this.state.ruleHelpers[ruleKey] = ruleCheck;
   }
 
   public permissionCheckOnly = (action: action, collectionPath: string): boolean => {
@@ -1240,6 +1251,7 @@ export const EdgeFirebase = class {
     users: {},
     registrationCode: "",
     registrationMeta: {},
+    ruleHelpers: {},
   });
 
   public getDocData = async (
