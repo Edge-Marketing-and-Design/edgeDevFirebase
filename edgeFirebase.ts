@@ -594,7 +594,7 @@ export const EdgeFirebase = class {
 
   public sendPhoneCode = async (phone: string): Promise<any> => {
     try {
-      const callable = httpsCallable(this.functions, "sendVerificationCode");
+      const callable = httpsCallable(this.functions, "edgeFirebase-sendVerificationCode");
       const result: any = await callable({phone: phone});
 
       if (result.data.success !== false) {
