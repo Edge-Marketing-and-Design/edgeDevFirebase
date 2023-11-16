@@ -30,12 +30,27 @@ fi
 cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
 cp ./src/config.js "$project_root/functions/config.js"
 
-if [ ! -f "$project_root/.env.dev" ]; then
-  cp ./src/.env.dev "$project_root/.env.dev"
+if [ ! -f "$project_root/functions/.env.dev" ]; then
+  cp ./src/.env.dev "$project_root/functions/.env.dev"
 fi
 
-if [ ! -f "$project_root/.env.prod" ]; then
-  cp ./src/.env.prod "$project_root/.env.prod"
+if [ ! -f "$project_root/functions/.env.prod" ]; then
+  cp ./src/.env.prod "$project_root/functions/.env.prod"
+fi
+
+if [ ! -f "$project_root/.env.development" ]; then
+  cp ./src/.env.dev "$project_root/.env.development"
+fi
+
+if [ ! -f "$project_root/.env.production" ]; then
+  cp ./src/.env.prod "$project_root/functions/.env.production"
+fi
+
+if [ ! -f "$project_root/functions/package.json" ]; then
+  cp ./src/package.json "$project_root/functions/package.json"
+  cd "$project_root/functions"
+  npm install --no-audit --silent
+  cd "$project_root"
 fi
 
 [ "$(tail -c1 $project_root/functions/index.js)" != "" ] && echo "" >> "$project_root/functions/index.js"
