@@ -22,11 +22,15 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
   sed -e '1s/^/\/\/ #EDGE FIREBASE RULES START\n/' -e '$s/$/\n\/\/ #EDGE FIREBASE RULES END/' \
   >> "$project_root/firestore.rules";
 
+if [ ! -d "$project_root/functions" ]; then
+  mkdir "$project_root/functions"
+fi
+
 cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
 cp ./src/config.js "$project_root/functions/config.js"
 
 if [ ! -f "$project_root/functions/index.js" ]; then
-  cp ./src/.env.dev "$project_root/functions/index.js"
+  cp ./src/index.js "$project_root/functions/index.js"
 fi
 
 if [ ! -f "$project_root/functions/.env.dev" ]; then
