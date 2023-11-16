@@ -21,23 +21,23 @@ exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 1
       if (!docSnapshot.exists) {
         throw new Error('Document does not exist!')
       }
-      const emailData = docSnapshot.data()
-      const emailTimestamp = emailData.timestamp ? emailData.timestamp.toMillis() : 0
-      const delayTimestamp = emailData.minuteDelay ? emailTimestamp + emailData.minuteDelay * 60 * 1000 : 0
+      const docData = docSnapshot.data()
+      const emailTimestamp = docData.timestamp ? docData.timestamp.toMillis() : 0
+      const delayTimestamp = docData.minuteDelay ? emailTimestamp + docData.minuteDelay * 60 * 1000 : 0
       const currentTimestamp = Date.now()
       // Check if current time is beyond the timestamp + minuteDelay, or if timestamp or minuteDelay is not set
-      if (emailTimestamp > currentTimestamp || currentTimestamp >= delayTimestamp || !emailData.timestamp || !emailData.minuteDelay) {
+      if (emailTimestamp > currentTimestamp || currentTimestamp >= delayTimestamp || !docData.timestamp || !docData.minuteDelay) {
         // Check if topic and payload exist and are not empty
-        if (emailData.topic && emailData.payload && emailData.topic.trim() !== '' && emailData.payload.trim() !== '') {
+        if (docData.topic && docData.payload && typeof docData.payload === 'object' && docData.topic.trim() !== '') {
           try {
-            await pubsub.topic(emailData.topic).publishMessage({ data: Buffer.from(JSON.stringify(emailData.payload)) })
+            await pubsub.topic(docData.topic).publishMessage({ data: Buffer.from(JSON.stringify(docData.payload)) })
             // Delete the document after successfully publishing the message
             transaction.delete(doc.ref)
           }
           catch (error) {
-            console.error(`Error publishing message to topic ${emailData.topic}:`, error)
+            console.error(`Error publishing message to topic ${docData.topic}:`, error)
             // Increment retry count and set new delay
-            const retryCount = emailData.retry ? emailData.retry + 1 : 1
+            const retryCount = docData.retry ? docData.retry + 1 : 1
             if (retryCount <= 3) {
               const minuteDelay = retryCount === 1 ? 1 : retryCount === 2 ? 10 : 30
               transaction.update(doc.ref, { retry: retryCount, minuteDelay })

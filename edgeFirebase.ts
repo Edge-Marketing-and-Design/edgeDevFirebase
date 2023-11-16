@@ -338,7 +338,7 @@ export const EdgeFirebase = class {
         this.user.specialPermissions = specialPermissions;
       }
     );
-    this.unsubscibe.userMeta = metaUnsubscribe;
+    this.unsubscribe.userMeta = metaUnsubscribe;
   };
 
   private startCollectionPermissionsSync = async (): Promise<void> => {
@@ -397,7 +397,7 @@ export const EdgeFirebase = class {
       });
       this.state.collectionPermissions = items;
     });
-    this.unsubscibe['collection-data'] = unsubscribe
+    this.unsubscribe['collection-data'] = unsubscribe
   }
 
   private ruleHelperReset = async (): Promise<void> => {
@@ -407,7 +407,8 @@ export const EdgeFirebase = class {
   }
 
   private startUserMetaSync = async (docSnap): Promise<void> => {
-    await this.ruleHelperReset();
+    // Took this out because if another client is logged in, it breaks the other client
+    // await this.ruleHelperReset();
     await this.startCollectionPermissionsSync()
     await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
@@ -1171,10 +1172,10 @@ export const EdgeFirebase = class {
   };
 
   public logOut = (): void => {
-    for (const key of Object.keys(this.unsubscibe)) {
-      if (this.unsubscibe[key] instanceof Function) {
-        this.unsubscibe[key]();
-        this.unsubscibe[key] = null;
+    for (const key of Object.keys(this.unsubscribe)) {
+      if (this.unsubscribe[key] instanceof Function) {
+        this.unsubscribe[key]();
+        this.unsubscribe[key] = null;
         this.data[key] = {};
       }
     }
@@ -1229,7 +1230,7 @@ export const EdgeFirebase = class {
   // Simple Store Items (add matching key per firebase collection)
   public data: CollectionDataObject = reactive({});
 
-  public unsubscibe: CollectionUnsubscribeObject = reactive({});
+  public unsubscribe: CollectionUnsubscribeObject = reactive({});
   
   public user: UserDataObject = reactive({
     uid: null,
@@ -1502,7 +1503,7 @@ export const EdgeFirebase = class {
     const canRead = await this.permissionCheck("read", collectionPath + '/' + docId);
     this.data[collectionPath + '/' + docId] = {};
     this.stopSnapshot(collectionPath + '/' + docId);
-    this.unsubscibe[collectionPath + '/' + docId] = null;
+    this.unsubscribe[collectionPath + '/' + docId] = null;
     if (canRead) {
       const docRef = doc(this.db, collectionPath, docId);
       
@@ -1544,7 +1545,7 @@ export const EdgeFirebase = class {
             meta: {}
           }));
         });
-        this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
+        this.unsubscribe[collectionPath + '/' + docId] = unsubscribe;
       });
     } else {
       return this.sendResponse({
@@ -1565,10 +1566,9 @@ export const EdgeFirebase = class {
     const canRead = await this.permissionCheck("read", collectionPath);
     this.data[collectionPath] = {};
     this.stopSnapshot(collectionPath);
-    this.unsubscibe[collectionPath] = null;
+    this.unsubscribe[collectionPath] = null;
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max);
-    
       return new Promise<actionResponse>((resolve, reject) => {
         let firstRun = true;
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -1579,7 +1579,6 @@ export const EdgeFirebase = class {
             items[doc.id] = item;
           });
           this.data[collectionPath] = items;
-          this.unsubscibe[collectionPath] = unsubscribe;
           
           // Only resolve or reject the Promise on first run of onSnapshot
           if(firstRun) {
@@ -1607,6 +1606,7 @@ export const EdgeFirebase = class {
             meta: {}
           }));
         });
+        this.unsubscribe[collectionPath] = unsubscribe;
       });
     } else {
       return this.sendResponse({
@@ -1639,7 +1639,7 @@ export const EdgeFirebase = class {
               collectionPath.replaceAll('/', '-')
             )
           )
-          const unsubscibe = await onSnapshot(q, (querySnapshot) => {
+          const unsubscribe = await onSnapshot(q, (querySnapshot) => {
             const items = {};
             querySnapshot.forEach((doc) => {
               const user = doc.data();
@@ -1679,7 +1679,7 @@ export const EdgeFirebase = class {
             });
             this.state.users = items;
           });
-          this.unsubscibe["staged-users"] = unsubscibe;
+          this.unsubscribe["staged-users"] = unsubscribe;
         } else {
           const q = query(
             collection(this.db, "public-users"),
@@ -1689,7 +1689,7 @@ export const EdgeFirebase = class {
               collectionPath.replaceAll('/', '-')
             )
           )
-          const unsubscibe = await onSnapshot(q, (querySnapshot) => {
+          const unsubscribe = await onSnapshot(q, (querySnapshot) => {
             const items = {};
             querySnapshot.forEach((doc) => {
               const user = doc.data();
@@ -1703,7 +1703,7 @@ export const EdgeFirebase = class {
             });
             this.state.users = items;
           });
-          this.unsubscibe["staged-users"] = unsubscibe;
+          this.unsubscribe["staged-users"] = unsubscribe;
         }
       }
     };
@@ -2090,9 +2090,9 @@ export const EdgeFirebase = class {
   };
 
   public stopSnapshot = (collectionPath: string): void => {
-    if (this.unsubscibe[collectionPath] instanceof Function) {
-      this.unsubscibe[collectionPath]();
-      this.unsubscibe[collectionPath] = null;
+    if (this.unsubscribe[collectionPath] instanceof Function) {
+      this.unsubscribe[collectionPath]();
+      this.unsubscribe[collectionPath] = null;
     }
   };
 };
