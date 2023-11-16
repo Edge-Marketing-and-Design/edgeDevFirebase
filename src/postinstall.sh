@@ -22,13 +22,12 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
   sed -e '1s/^/\/\/ #EDGE FIREBASE RULES START\n/' -e '$s/$/\n\/\/ #EDGE FIREBASE RULES END/' \
   >> "$project_root/firestore.rules";
 
-if [ ! -f "$project_root/functions/index.js" ]; then
-  mkdir -p "$project_root/functions"
-  echo "require('dotenv').config({ path: process.env.NODE_ENV === 'production' ? '.env.prod' : '.env.dev' })" > "$project_root/functions/index.js";
-fi
-
 cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
 cp ./src/config.js "$project_root/functions/config.js"
+
+if [ ! -f "$project_root/functions/index.js" ]; then
+  cp ./src/.env.dev "$project_root/functions/index.js"
+fi
 
 if [ ! -f "$project_root/functions/.env.dev" ]; then
   cp ./src/.env.dev "$project_root/functions/.env.dev"
@@ -52,12 +51,3 @@ if [ ! -f "$project_root/functions/package.json" ]; then
   npm install --no-audit --silent
   cd "$project_root"
 fi
-
-[ "$(tail -c1 $project_root/functions/index.js)" != "" ] && echo "" >> "$project_root/functions/index.js"
-
-sed -i.backup '/\/\/ START @edge\/firebase functions/,/\/\/ END @edge\/firebase functions/d' "$project_root/functions/index.js"
-
-awk '/\/\/ START @edge\/firebase functions/,/\/\/ END @edge\/firebase functions/' ./src/functions.js | \
-  sed '1d;$d' | \
-  sed -e '1s/^/\/\/ START @edge\/firebase functions\n/' -e '$s/$/\n\/\/ END @edge\/firebase functions/' \
-  >> "$project_root/functions/index.js";
