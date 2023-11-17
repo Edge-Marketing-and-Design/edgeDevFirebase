@@ -41,6 +41,8 @@ import {
   EmailAuthProvider,
   sendPasswordResetEmail,
   confirmPasswordReset,
+  checkActionCode,
+  applyActionCode,
   connectAuthEmulator,
   deleteUser,
   OAuthProvider,
@@ -49,6 +51,7 @@ import {
   signInWithPhoneNumber,
   sendSignInLinkToEmail,
   updateEmail,
+  verifyBeforeUpdateEmail,
   RecaptchaVerifier,
   ConfirmationResult,
   PhoneAuthProvider,
@@ -260,7 +263,7 @@ export const EdgeFirebase = class {
 
   public updateEmail = async (newEmail: string): Promise<actionResponse> => {
     try {
-      await updateEmail(this.auth.currentUser, newEmail);
+      await  verifyBeforeUpdateEmail(this.auth.currentUser, newEmail);
       return {
         success: true,
         message: "Email updated",
@@ -772,6 +775,27 @@ export const EdgeFirebase = class {
       return this.sendResponse({
         success: true,
         message: "line 595",
+        meta: {}
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: error.message,
+        meta: {}
+      });
+    }
+  };
+
+  public emailUpdate = async (
+    oobCode: string
+  ): Promise<actionResponse> => {
+
+    try {
+      const info = await checkActionCode(this.auth, oobCode);
+      await applyActionCode(this.auth, oobCode);
+      return this.sendResponse({
+        success: true,
+        message: "line 798",
         meta: {}
       });
     } catch (error) {
