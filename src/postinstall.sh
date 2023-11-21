@@ -46,7 +46,7 @@ if [ ! -f "$project_root/.env.development" ]; then
 fi
 
 if [ ! -f "$project_root/.env.production" ]; then
-  cp ./src/.env.prod "$project_root/functions/.env.production"
+  cp ./src/.env.prod "$project_root/.env.production"
 fi
 
 if [ ! -f "$project_root/functions/package.json" ]; then
