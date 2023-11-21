@@ -1,4 +1,4 @@
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, pubsub } = require('./config.js')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
@@ -57,7 +57,8 @@ exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 1
   }
 })
 
-exports.sendVerificationCode = functions.https.onCall(async (data, context) => {
+exports.sendVerificationCode = onCall(async (request) => {
+  const data = request.data
   const code = (Math.floor(Math.random() * 1000000) + 1000000).toString().substring(1)
   const phone = formatPhoneNumber(data.phone)
 
@@ -87,7 +88,8 @@ exports.sendVerificationCode = functions.https.onCall(async (data, context) => {
   }
 })
 
-exports.verifyPhoneNumber = functions.https.onCall(async (data, context) => {
+exports.verifyPhoneNumber = onCall(async (request) => {
+  const data = request.data
   const phone = data.phone
   const code = data.code
 
@@ -120,7 +122,7 @@ exports.verifyPhoneNumber = functions.https.onCall(async (data, context) => {
   }
 })
 
-exports.initFirestore = functions.https.onCall(async (data, context) => {
+exports.initFirestore = onCall(async (request) => {
   // checks to see of the collections 'collection-data' and 'staged-users' exist if not will seed them with data
   const collectionData = await db.collection('collection-data').get()
   const stagedUsers = await db.collection('staged-users').get()
@@ -154,8 +156,10 @@ exports.initFirestore = functions.https.onCall(async (data, context) => {
   }
 })
 
-exports.removeNonRegisteredUser = functions.https.onCall(async (data, context) => {
-  if (data.uid === context.auth.uid) {
+exports.removeNonRegisteredUser = onCall(async (request) => {
+  const data = request.data
+  const auth = request.auth
+  if (data.uid === auth.uid) {
     const stagedUser = await db.collection('staged-users').doc(data.docId).get()
     if (stagedUser.exists) {
       const stagedUserData = stagedUser.data()
@@ -189,8 +193,10 @@ exports.removeNonRegisteredUser = functions.https.onCall(async (data, context) =
   return { success: false, message: 'Non-registered user not found.' }
 })
 
-exports.currentUserRegister = functions.https.onCall(async (data, context) => {
-  if (data.uid === context.auth.uid) {
+exports.currentUserRegister = onCall(async (request) => {
+  const data = request.data
+  const auth = request.auth
+  if (data.uid === auth.uid) {
     const stagedUser = await db.collection('staged-users').doc(data.registrationCode).get()
     if (!stagedUser.exists) {
       return { success: false, message: 'Registration code not found.' }
@@ -246,10 +252,11 @@ exports.checkOrgIdExists = onCall(async (request) => {
   return { exists: orgDoc.exists }
 })
 
-exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpdate(async (change, context) => {
-  const eventId = context.eventId
+exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeoutSeconds: 180 }, async (event) => {
+  const change = event.data
+  const eventId = event.id
   const eventRef = db.collection('events').doc(eventId)
-  const stagedDocId = context.params.docId
+  const stagedDocId = event.params.docId
   let newData = change.after.data()
   const oldData = change.before.data()
 
@@ -286,7 +293,26 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
       if (Object.prototype.hasOwnProperty.call(newData, 'subCreate') && Object.values(newData.subCreate).length > 0) {
         const subCreate = newData.subCreate
         delete newData.subCreate
-        const addedDoc = await db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue })
+        let newDocId = ''
+        if (Object.prototype.hasOwnProperty.call(newData, 'requestedOrgId')) {
+          newDocId = newData.requestedOrgId.toLowerCase()
+          delete newData.requestedOrgId
+        }
+        let addedDoc
+        if (newDocId) {
+          const docRef = db.collection(subCreate.rootPath).doc(newDocId)
+          const doc = await docRef.get()
+          if (!doc.exists) {
+            await docRef.set({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue })
+            addedDoc = docRef
+          }
+          else {
+            addedDoc = await db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue })
+          }
+        }
+        else {
+          addedDoc = await db.collection(subCreate.rootPath).add({ [subCreate.dynamicDocumentField]: newData.dynamicDocumentFieldValue })
+        }
         await db.collection(subCreate.rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
         delete newData.dynamicDocumentFieldValue
         const newRole = { [`${subCreate.rootPath}-${addedDoc.id}`]: { collectionPath: `${subCreate.rootPath}-${addedDoc.id}`, role: subCreate.role } }
@@ -316,42 +342,33 @@ exports.updateUser = functions.firestore.document('staged-users/{docId}').onUpda
   await markProcessed(eventRef)
 })
 
-function setUser(userRef, newData, oldData, stagedDocId) {
-// IT's OK If "users" doesn't match exactly matched "staged-users" because this is only preventing
-// writing from outside the @edgdev/firebase functions, so discrepancies will be rare since
-// the package will prevent before it gets this far.
-  return userRef.get().then((user) => {
-    let userUpdate = { meta: newData.meta, stagedDocId }
+async function setUser(userRef, newData, oldData, stagedDocId) {
 
-    if (newData.meta && newData.meta.name) {
-      const publicUserRef = db.collection('public-users').doc(newData.userId)
-      const publicMeta = { name: newData.meta.name }
-      publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: newData.userId })
-    }
+  const user = await userRef.get()
+  let userUpdate = { meta: newData.meta, stagedDocId }
 
-    if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
-      userUpdate = { ...userUpdate, roles: newData.roles }
-    }
-    if (Object.prototype.hasOwnProperty.call(newData, 'specialPermissions')) {
-      userUpdate = { ...userUpdate, specialPermissions: newData.specialPermissions }
-    }
+  if (newData.meta && newData.meta.name) {
+    const publicUserRef = db.collection('public-users').doc(stagedDocId)
+    const publicMeta = { name: newData.meta.name }
+    publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: stagedDocId })
+  }
 
-    if (!oldData.userId) {
-      userUpdate = { ...userUpdate, userId: newData.uid }
-    }
-    if (!user.exists) {
-      return userRef.set(userUpdate)
-    }
-    else {
-      return userRef.update(userUpdate)
-    }
-  })
-}
+  if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
+    userUpdate = { ...userUpdate, roles: newData.roles }
+  }
+  if (Object.prototype.hasOwnProperty.call(newData, 'specialPermissions')) {
+    userUpdate = { ...userUpdate, specialPermissions: newData.specialPermissions }
+  }
 
-function shouldProcess(eventRef) {
-  return eventRef.get().then((eventDoc) => {
-    return !eventDoc.exists || !eventDoc.data().processed
-  })
+  if (!oldData.userId) {
+    userUpdate = { ...userUpdate, userId: newData.uid }
+  }
+  if (!user.exists) {
+    return userRef.set(userUpdate)
+  }
+  else {
+    return userRef.update(userUpdate)
+  }
 }
 
 function markProcessed(eventRef) {
