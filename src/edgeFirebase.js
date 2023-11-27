@@ -252,6 +252,71 @@ exports.checkOrgIdExists = onCall(async (request) => {
   return { exists: orgDoc.exists }
 })
 
+const permissionCheck = async (userId, action, collectionPath) => {
+  // Fetch user document
+  const userDoc = await db.collection('users').doc(userId).get()
+  const userData = userDoc.data()
+
+  // Fetch roles from user data
+  const roles = userData.roles || []
+
+  // Check each role for permission
+  for (let role of roles) {
+    if (role.collectionPath === collectionPath) {
+      // Fetch collection data
+      const collectionDoc = await db.collection('collection-data').doc(collectionPath).get()
+      const collectionData = collectionDoc.exists ? collectionDoc.data() : await db.collection('collection-data').doc('-default-').get().then(doc => doc.data())
+
+      // Check if action is permitted
+      if (collectionData && collectionData[role.role] && collectionData[role.role][action]) {
+        return true
+      }
+    }
+  }
+
+  // If no permission found, return false
+  return false
+}
+
+exports.deleteSelf = onCall(async (request) => {
+  if (request.data.uid === request.auth.uid) {
+    try {
+      const userDoc = await db.collection('staged-users').doc(request.auth.uid).get()
+      const userData = userDoc.data()
+      const userCollectionPaths = userData.collectionPaths || []
+      
+      for (let path of userCollectionPaths) {
+        const usersWithSamePath = await db.collection('staged-users').where('collectionPaths', 'array-contains', path).get()
+      
+        // If no other users have the same collection path, delete the path and all documents and collections under it
+        if (usersWithSamePath.size <= 1) {
+          const docsToDelete = await db.collection(path).get()
+          const batch = db.batch()
+          docsToDelete.docs.forEach((doc) => {
+            batch.delete(doc.ref)
+          })
+          await batch.commit()
+        }
+      }
+
+      // Delete from 'staged-users' collection
+      await db.collection('staged-users').doc(request.data.uid).delete()
+
+      // Delete from 'users' collection
+      await db.collection('users').doc(request.data.uid).delete()
+
+      // Delete the user from Firebase
+      await admin.auth().deleteUser(request.data.uid)
+
+      return { success: true }
+    }
+    catch (error) {
+      console.error('Error deleting user:', error)
+      return { success: false, error }
+    }
+  }
+})
+
 exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeoutSeconds: 180 }, async (event) => {
   const change = event.data
   const eventId = event.id
