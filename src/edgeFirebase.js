@@ -261,7 +261,7 @@ const permissionCheck = async (userId, action, collectionPath) => {
   const roles = userData.roles || []
 
   // Check each role for permission
-  for (let role of roles) {
+  for (const role of roles) {
     if (role.collectionPath === collectionPath) {
       // Fetch collection data
       const collectionDoc = await db.collection('collection-data').doc(collectionPath).get()
@@ -284,18 +284,29 @@ exports.deleteSelf = onCall(async (request) => {
       const userDoc = await db.collection('staged-users').doc(request.auth.uid).get()
       const userData = userDoc.data()
       const userCollectionPaths = userData.collectionPaths || []
-      
-      for (let path of userCollectionPaths) {
+
+      for (const path of userCollectionPaths) {
         const usersWithSamePath = await db.collection('staged-users').where('collectionPaths', 'array-contains', path).get()
-      
+
         // If no other users have the same collection path, delete the path and all documents and collections under it
         if (usersWithSamePath.size <= 1) {
-          const docsToDelete = await db.collection(path).get()
-          const batch = db.batch()
-          docsToDelete.docs.forEach((doc) => {
-            batch.delete(doc.ref)
-          })
-          await batch.commit()
+          const adjustedPath = path.replace(/-/g, '/')
+          const docRef = db.doc(adjustedPath)
+          const doc = await docRef.get()
+
+          if (doc.exists) {
+            // If the path is a document, delete it directly
+            await docRef.delete()
+          }
+          else {
+            // If the path is a collection, delete all documents under it
+            const docsToDelete = await db.collection(adjustedPath).get()
+            const batch = db.batch()
+            docsToDelete.docs.forEach((doc) => {
+              batch.delete(doc.ref)
+            })
+            await batch.commit()
+          }
         }
       }
 
@@ -408,7 +419,6 @@ exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeo
 })
 
 async function setUser(userRef, newData, oldData, stagedDocId) {
-
   const user = await userRef.get()
   let userUpdate = { meta: newData.meta, stagedDocId }
 
