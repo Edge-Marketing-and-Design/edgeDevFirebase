@@ -253,7 +253,7 @@ service cloud.firestore {
                       ("stripeCustomerId" in request.resource.data && (!("stripeCustomerId" in resource.data) || resource.data.stripeCustomerId != request.resource.data.stripeCustomerId)) ||
                       ("stripeSubscription" in request.resource.data && (!("stripeSubscription" in resource.data) || resource.data.stripeSubscription != request.resource.data.stripeSubscription)) ||
                       ("stripeProductId" in request.resource.data && (!("stripeProductId" in resource.data) || resource.data.stripeProductId != request.resource.data.stripeProductId)) ||
-                      ("stripePriceId" in request.resource.data && (!("stripePriceId" in resource.data) || resource.data.stripePriceId != request.resource.data.stripePriceId)) ||
+                      ("stripePriceId" in request.resource.data && (!("stripePriceId" in resource.data) || resource.data.stripePriceId != request.resource.data.stripePriceId))
                     )
                   ) &&
                   request.auth != null &&
