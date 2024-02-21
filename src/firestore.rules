@@ -1,5 +1,29 @@
+rules_version = '2';
 // #EDGE FIREBASE RULES START
 service cloud.firestore {
+
+  match /databases/{database}/documents/phone-auth/{phone} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+
+  match /databases/{database}/documents/topic-queue/{topic} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
+
+
+  match /databases/{database}/documents/public-users/{user} {
+    allow read: if request.auth != null;
+    allow list: if request.auth != null;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
 
   match /databases/{database}/documents/events/{event} {
     allow read: if false;
@@ -221,9 +245,17 @@ service cloud.firestore {
       }
       function checkPermission(collectionPath, permissionCheck) {
           let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
-          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers"];
+          let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers", "phone-auth", "public-users", "topic-queue"];
           let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
           return !(collectionPath in skipPaths) &&
+                 !(permissionCheck == "write" && 
+                    (
+                      ("stripeCustomerId" in request.resource.data && (!("stripeCustomerId" in resource.data) || resource.data.stripeCustomerId != request.resource.data.stripeCustomerId)) ||
+                      ("stripeSubscription" in request.resource.data && (!("stripeSubscription" in resource.data) || resource.data.stripeSubscription != request.resource.data.stripeSubscription)) ||
+                      ("stripeProductId" in request.resource.data && (!("stripeProductId" in resource.data) || resource.data.stripeProductId != request.resource.data.stripeProductId)) ||
+                      ("stripePriceId" in request.resource.data && (!("stripePriceId" in resource.data) || resource.data.stripePriceId != request.resource.data.stripePriceId))
+                    )
+                  ) &&
                   request.auth != null &&
                   collectionPath in ruleHelper &&
                   "permissionCheckPath" in ruleHelper[collectionPath] &&
@@ -290,4 +322,4 @@ service cloud.firestore {
       }
     }
   }
-  // #EDGE FIREBASE RULES END
+// #EDGE FIREBASE RULES END

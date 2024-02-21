@@ -41,12 +41,22 @@ import {
   EmailAuthProvider,
   sendPasswordResetEmail,
   confirmPasswordReset,
+  checkActionCode,
+  applyActionCode,
   connectAuthEmulator,
   deleteUser,
   OAuthProvider,
   browserPopupRedirectResolver,
   signInWithPopup,
+  signInWithPhoneNumber,
+  sendSignInLinkToEmail,
   updateEmail,
+  verifyBeforeUpdateEmail,
+  RecaptchaVerifier,
+  ConfirmationResult,
+  PhoneAuthProvider,
+  signInWithCustomToken,
+  updateProfile,
 } from "firebase/auth";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
@@ -85,7 +95,7 @@ interface permissions {
 
 type action = "assign" | "read" | "write" | "delete";
 
-type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple";
+type authProviders = "email" | "microsoft" | "google" | "facebook" | "github" | "twitter" | "apple" | "phone" | "emailLink" | "customToken";
 
 interface role {
   collectionPath: "-" | string; // - is root
@@ -103,7 +113,7 @@ interface UserDataObject {
   firebaseUser: object;
   oAuthCredential: { accessToken: string; idToken: string;}
   loggedIn: boolean;
-  loggingIn: boolean;
+  loggingIn: boolean | null;
   logInError: boolean;
   logInErrorMessage: string;
   meta: object;
@@ -129,10 +139,15 @@ interface newUser {
 interface userRegister {
   uid?: string;
   email?: string;
+  token?: string;
+  identifier?: string;
+  phoneCode?: string;
+  phoneNumber?: string;
   password?: string;
   meta: object;
   registrationCode: string;
   dynamicDocumentFieldValue?: string;
+  requestedOrgId?: string;
 }
 
 
@@ -209,6 +224,7 @@ export const EdgeFirebase = class {
     } else {
       this.auth = initializeAuth(this.app, { persistence });
     }
+
     if (this.firebaseConfig.emulatorAuth) {
       connectAuthEmulator(this.auth, `http://127.0.0.1:${this.firebaseConfig.emulatorAuth}`)
     }
@@ -247,7 +263,7 @@ export const EdgeFirebase = class {
 
   public updateEmail = async (newEmail: string): Promise<actionResponse> => {
     try {
-      await updateEmail(this.auth.currentUser, newEmail);
+      await  verifyBeforeUpdateEmail(this.auth.currentUser, newEmail);
       return {
         success: true,
         message: "Email updated",
@@ -325,7 +341,7 @@ export const EdgeFirebase = class {
         this.user.specialPermissions = specialPermissions;
       }
     );
-    this.unsubscibe.userMeta = metaUnsubscribe;
+    this.unsubscribe.userMeta = metaUnsubscribe;
   };
 
   private startCollectionPermissionsSync = async (): Promise<void> => {
@@ -384,12 +400,18 @@ export const EdgeFirebase = class {
       });
       this.state.collectionPermissions = items;
     });
-    this.unsubscibe['collection-data'] = unsubscribe
+    this.unsubscribe['collection-data'] = unsubscribe
   }
 
-
+  private ruleHelperReset = async (): Promise<void> => {
+    const initRoleHelper = { uid: this.user.uid, 'edge-assignment-helper': {permissionType: "roles"} }
+    this.state.ruleHelpers['edge-assignment-helper'] = {permissionType: "roles"}
+    await setDoc(doc(this.db, "rule-helpers", this.user.uid), initRoleHelper);
+  }
 
   private startUserMetaSync = async (docSnap): Promise<void> => {
+    // Took this out because if another client is logged in, it breaks the other client
+    // await this.ruleHelperReset();
     await this.startCollectionPermissionsSync()
     await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
@@ -411,6 +433,9 @@ export const EdgeFirebase = class {
 
   private setOnAuthStateChanged = (): void => {
     onAuthStateChanged(this.auth, (userAuth) => {
+      console.log('onAuthStateChanged')
+      const oldDiv = document.getElementById("recaptcha-container");
+      if (oldDiv) oldDiv.remove();
       if (userAuth) {
         this.user.loggingIn = true;
         this.user.email = userAuth.email;
@@ -432,6 +457,64 @@ export const EdgeFirebase = class {
     });
   };
 
+  public loginWithCustomToken = async (token: string): Promise<void> => {
+    try {
+      const result = await signInWithCustomToken(this.auth, token);
+      if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+        this.user.logInError = true;
+        this.user.logInErrorMessage = JSON.stringify(result)
+        this.logOut();
+        return;
+      }
+      const userRef = doc(this.db, "users", result.user.uid);
+      const userSnap = await getDoc(userRef);
+      if (!userSnap.exists()) { 
+        this.user.logInError = true;
+        this.user.logInErrorMessage = "User does not exist";
+        this.logOut();
+        return;
+      }
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return;
+    }
+  }
+
+  public logInWithPhone = async (phoneNumber: string, phoneCode: string): Promise<void> => {
+    try {
+      const verifyCode: any = await this.runFunction("edgeFirebase-verifyPhoneNumber", {phone: phoneNumber, code: phoneCode});
+      if (verifyCode.data.success) {
+        const result = await signInWithCustomToken(this.auth, verifyCode.data.token);
+        if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+          this.user.logInError = true;
+          this.user.logInErrorMessage = JSON.stringify(result)
+          this.logOut();
+          return;
+        }
+        const userRef = doc(this.db, "users", result.user.uid);
+        const userSnap = await getDoc(userRef);
+        if (!userSnap.exists()) { 
+          this.user.logInError = true;
+          this.user.logInErrorMessage = "User does not exist";
+          this.logOut();
+          return;
+        }
+      } else {
+        this.user.logInError = true;
+        this.user.logInErrorMessage = verifyCode.data.error;
+        this.logOut();
+        return;
+      }
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return;
+    }
+  };
+
   public logInWithMicrosoft = async (providerScopes: string[] = []): Promise<void> => {
       const result = await this.signInWithMicrosoft(providerScopes);
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
@@ -441,7 +524,7 @@ export const EdgeFirebase = class {
         return;
       }
       console.log(result.user.uid);
-      const userRef = doc(this.db, "staged-users", result.user.uid);
+      const userRef = doc(this.db, "users", result.user.uid);
       const userSnap = await getDoc(userRef);
       if (!userSnap.exists()) { 
         this.user.logInError = true;
@@ -480,12 +563,12 @@ export const EdgeFirebase = class {
       });
     }
     // userRegister.uid = this.user.uid;
-    const result = await this.runFunction("currentUserRegister", userRegister as unknown as Record<string, unknown>);
+    const result = await this.runFunction("edgeFirebase-currentUserRegister", userRegister as unknown as Record<string, unknown>);
     const resultData = result.data as {success: boolean, message: string};
     if (resultData.success) {
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 488",
         meta: {}
       });
     } else {
@@ -496,6 +579,47 @@ export const EdgeFirebase = class {
       });
     }
   }
+
+  public sendEmailLink = async (email: string): Promise<any> => {
+    const actionCodeSettings = {
+      url: window.location.href,
+      handleCodeInApp: true,
+    };
+    try {
+      await sendSignInLinkToEmail(this.auth, email, actionCodeSettings);
+      return true;
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return false;
+    }
+  };
+
+  public sendPhoneCode = async (phone: string): Promise<any> => {
+    try {
+      const callable = httpsCallable(this.functions, "edgeFirebase-sendVerificationCode");
+      const result: any = await callable({phone: phone});
+
+      if (result.data.success !== false) {
+        console.log('good')
+        return result.data;
+      } else  {
+        console.log('bad')
+        this.user.logInError = true;
+        this.user.logInErrorMessage = result.data.error;
+        this.logOut();
+        return false;
+      }
+    } catch (error) {
+      this.user.logInError = true;
+      this.user.logInErrorMessage = error.message;
+      this.logOut();
+      return false;
+    }
+  }
+
+
 
   public registerUser = async (
     userRegister: userRegister,
@@ -508,6 +632,18 @@ export const EdgeFirebase = class {
         message: "Registration code is required.",
         meta: {}
       });
+    }
+    if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
+      if (userRegister.requestedOrgId) {
+        const result: any = await this.runFunction("edgeFirebase-checkOrgIdExists", {orgId: userRegister.requestedOrgId.toLowerCase()});
+        if (result.data.exists) {
+          return this.sendResponse({
+            success: false,
+            message: "Organization ID already exists.",
+            meta: {}
+          });
+        }
+      }
     }
     const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
     const userSnap = await getDoc(userRef);
@@ -542,6 +678,50 @@ export const EdgeFirebase = class {
           }
         } else if (authProvider === "microsoft") {
          response = await this.registerUserWithMicrosoft(providerScopes);
+        } else if (authProvider === "customToken") {
+          if (!Object.prototype.hasOwnProperty.call(userRegister, 'token')) {
+            return this.sendResponse({
+              success: false,
+              message: "Token is required for registration when authProvider is customToken.",
+              meta: {}
+            });
+          }
+          if (!Object.prototype.hasOwnProperty.call(userRegister, 'identifier')) {
+            return this.sendResponse({
+              success: false,
+              message: "Identifier is required for registration when authProvider is customToken.",
+              meta: {}
+            });
+          }
+          try {
+            response = await signInWithCustomToken(this.auth, userRegister.token);
+            await updateProfile(response.user, {
+              displayName: userRegister.identifier
+            });
+          } catch (error) {
+            response = error;
+          }
+        } else if (authProvider === "phone") {
+          try {
+            const verifyCode: any = await this.runFunction("edgeFirebase-verifyPhoneNumber", {phone: userRegister.phoneNumber, code: userRegister.phoneCode});
+            if (verifyCode.data.success) {
+              response = await signInWithCustomToken(this.auth, verifyCode.data.token);
+              await updateProfile(response.user, {
+                displayName: userRegister.phoneNumber
+              });
+            } else {
+              return this.sendResponse({
+                success: false,
+                message: verifyCode.data.error,
+                meta: {}
+              });
+            }
+          } catch (error) {
+            // Handle the case where the code is incorrect or expired
+            response = error;
+          }
+        } else if (authProvider === "emailLink") {
+          // TOOD: emailLink stuff
         }
         if (!Object.prototype.hasOwnProperty.call(response, "user")) { 
           return this.sendResponse({
@@ -550,19 +730,21 @@ export const EdgeFirebase = class {
             meta: {}
           });
         }
-
+        
         let metaUpdate = {};
         if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
           metaUpdate = userRegister.meta;
         }else{
           metaUpdate = user.meta;
         }
-
-        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
+        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown, requestedOrgId?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
         if (user.isTemplate) {
           stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, meta: user.meta, templateMeta: metaUpdate}
           if (Object.prototype.hasOwnProperty.call(userRegister, 'dynamicDocumentFieldValue')) {
             stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate}
+          }
+          if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
+            stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate, requestedOrgId: userRegister.requestedOrgId.toLowerCase()}
           }
         }
         const initRoleHelper = {uid: response.user.uid}
@@ -573,7 +755,7 @@ export const EdgeFirebase = class {
         this.logAnalyticsEvent("sign_up", { uid: response.user.uid});
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 576",
           meta: {}
         });
         
@@ -592,7 +774,28 @@ export const EdgeFirebase = class {
       await sendPasswordResetEmail(this.auth, email);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 595",
+        meta: {}
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: error.message,
+        meta: {}
+      });
+    }
+  };
+
+  public emailUpdate = async (
+    oobCode: string
+  ): Promise<actionResponse> => {
+
+    try {
+      const info = await checkActionCode(this.auth, oobCode);
+      await applyActionCode(this.auth, oobCode);
+      return this.sendResponse({
+        success: true,
+        message: "line 798",
         meta: {}
       });
     } catch (error) {
@@ -613,7 +816,7 @@ export const EdgeFirebase = class {
       await confirmPasswordReset(this.auth, oobCode, password);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 616",
         meta: {}
       });
     } catch (error) {
@@ -639,7 +842,7 @@ export const EdgeFirebase = class {
       await updatePassword(user, password);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 642",
         meta: {}
       });
     } catch (error) {
@@ -661,7 +864,7 @@ export const EdgeFirebase = class {
     }
     return this.sendResponse({
       success: true,
-      message: "",
+      message: "line 664",
       meta: {}
     });
   };
@@ -698,10 +901,10 @@ export const EdgeFirebase = class {
       }
     }
     if (removedFrom.length > 0) {
-      const response = await this.runFunction("removeNonRegisteredUser", {uid: this.user.uid, docId});
+      const response = await this.runFunction("edgeFirebase-removeNonRegisteredUser", {uid: this.user.uid, docId});
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 704",
         meta: {response}
       });
     } else {
@@ -726,7 +929,7 @@ export const EdgeFirebase = class {
         this.logOut();
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 729",
           meta: {}
         });
     } else {
@@ -804,7 +1007,12 @@ export const EdgeFirebase = class {
     }
     let index = collection.length;
     const ruleCheck: RuleCheck =  { permissionType: "", permissionCheckPath: "", fullPath: collectionPath.replaceAll("/", "-"), action };
-   
+    if (this.state.ruleHelpers[ruleKey]) {
+      const existingRuleHelper = this.state.ruleHelpers[ruleKey];
+      if (existingRuleHelper.fullPath === ruleCheck.fullPath && existingRuleHelper.action === ruleCheck.action) {
+        return;
+      }
+    }
     while (index > 0) {
       const collectionArray = JSON.parse(JSON.stringify(collection));
       const permissionCheck = collectionArray.splice(0, index).join("-");
@@ -844,6 +1052,7 @@ export const EdgeFirebase = class {
     }
     const check = {[ruleKey]: ruleCheck,  uid: this.user.uid };
     await setDoc(doc(this.db, "rule-helpers", this.user.uid), check, { merge: true });
+    this.state.ruleHelpers[ruleKey] = ruleCheck;
   }
 
   public permissionCheckOnly = (action: action, collectionPath: string): boolean => {
@@ -981,16 +1190,16 @@ export const EdgeFirebase = class {
     }
     return {
       success: true,
-      message: "",
+      message: "line 984",
       meta: {}
     }
   };
 
   public logOut = (): void => {
-    for (const key of Object.keys(this.unsubscibe)) {
-      if (this.unsubscibe[key] instanceof Function) {
-        this.unsubscibe[key]();
-        this.unsubscibe[key] = null;
+    for (const key of Object.keys(this.unsubscribe)) {
+      if (this.unsubscribe[key] instanceof Function) {
+        this.unsubscribe[key]();
+        this.unsubscribe[key] = null;
         this.data[key] = {};
       }
     }
@@ -1008,6 +1217,7 @@ export const EdgeFirebase = class {
       this.user.stagedDocId = null;
     })
   };
+
 
   public logIn = (credentials: Credentials): void => {
     this.logOut();
@@ -1044,12 +1254,12 @@ export const EdgeFirebase = class {
   // Simple Store Items (add matching key per firebase collection)
   public data: CollectionDataObject = reactive({});
 
-  public unsubscibe: CollectionUnsubscribeObject = reactive({});
+  public unsubscribe: CollectionUnsubscribeObject = reactive({});
   
   public user: UserDataObject = reactive({
     uid: null,
     email: "",
-    loggingIn: false,
+    loggingIn: null,
     loggedIn: false,
     logInError: false,
     logInErrorMessage: "",   
@@ -1066,6 +1276,7 @@ export const EdgeFirebase = class {
     users: {},
     registrationCode: "",
     registrationMeta: {},
+    ruleHelpers: {},
   });
 
   public getDocData = async (
@@ -1255,7 +1466,7 @@ export const EdgeFirebase = class {
           }
           return sendResponse({
             success: true,
-            message: "",
+            message: "line 1258",
             meta: {}
           });
         } else {
@@ -1313,28 +1524,52 @@ export const EdgeFirebase = class {
     collectionPath: string,
     docId: string
   ): Promise<actionResponse> => {
-    // console.log(collectionPath)
-    // console.log(docId)
     const canRead = await this.permissionCheck("read", collectionPath + '/' + docId);
     this.data[collectionPath + '/' + docId] = {};
     this.stopSnapshot(collectionPath + '/' + docId);
-    this.unsubscibe[collectionPath + '/' + docId] = null;
+    this.unsubscribe[collectionPath + '/' + docId] = null;
     if (canRead) {
       const docRef = doc(this.db, collectionPath, docId);
-      const unsubscribe = onSnapshot(docRef, (doc) => {
-        if (doc.exists()) {
-          const item = doc.data();
-          item.docId = doc.id;
-          this.data[collectionPath + '/' + docId] = item;
-        } else {
-          this.data[collectionPath + '/' + docId] = {};
-        }
-      });
-      this.unsubscibe[collectionPath + '/' + docId] = unsubscribe;
-      return this.sendResponse({
-        success: true,
-        message: "",
-        meta: {}
+      
+      return new Promise<actionResponse>((resolve, reject) => {
+        let firstRun = true;
+        const unsubscribe = onSnapshot(docRef, (doc) => {
+          if (doc.exists()) {
+            const item = doc.data();
+            item.docId = doc.id;
+            this.data[collectionPath + '/' + docId] = item;
+
+            // Only resolve the Promise on first run of onSnapshot if document exists
+            if(firstRun) {
+              firstRun = false;
+              resolve(this.sendResponse({
+                success: true,
+                message: "startDocumentSnapshot " + collectionPath + '/' + docId,
+                meta: {}
+              }));
+            }
+          } else {
+            this.data[collectionPath + '/' + docId] = {};
+
+            // Resolve the Promise with failure response if no document exists
+            if(firstRun) {
+              firstRun = false;
+              resolve(this.sendResponse({
+                success: false,
+                message: `No document found in "${collectionPath}/${docId}"`,
+                meta: {}
+              }));
+            }
+          }
+        }, (error) => {
+          // Reject the Promise with the error response
+          reject(this.sendResponse({
+            success: false,
+            message: `Error fetching document from "${collectionPath}/${docId}": ${error.message}`,
+            meta: {}
+          }));
+        });
+        this.unsubscribe[collectionPath + '/' + docId] = unsubscribe;
       });
     } else {
       return this.sendResponse({
@@ -1345,6 +1580,7 @@ export const EdgeFirebase = class {
     }
   };
 
+
   public startSnapshot = async (
     collectionPath: string,
     queryList: FirestoreQuery[] = [],
@@ -1354,10 +1590,9 @@ export const EdgeFirebase = class {
     const canRead = await this.permissionCheck("read", collectionPath);
     this.data[collectionPath] = {};
     this.stopSnapshot(collectionPath);
-    this.unsubscibe[collectionPath] = null;
+    this.unsubscribe[collectionPath] = null;
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max);
-    
       return new Promise<actionResponse>((resolve, reject) => {
         let firstRun = true;
         const unsubscribe = onSnapshot(q, (querySnapshot) => {
@@ -1368,7 +1603,6 @@ export const EdgeFirebase = class {
             items[doc.id] = item;
           });
           this.data[collectionPath] = items;
-          this.unsubscibe[collectionPath] = unsubscribe;
           
           // Only resolve or reject the Promise on first run of onSnapshot
           if(firstRun) {
@@ -1376,7 +1610,7 @@ export const EdgeFirebase = class {
               firstRun = false;
               resolve(this.sendResponse({
                 success: true,
-                message: "",
+                message: "startSnapshot " + collectionPath,
                 meta: {}
               }));
             } else { // reject if no items fetched
@@ -1396,6 +1630,7 @@ export const EdgeFirebase = class {
             meta: {}
           }));
         });
+        this.unsubscribe[collectionPath] = unsubscribe;
       });
     } else {
       return this.sendResponse({
@@ -1410,7 +1645,10 @@ export const EdgeFirebase = class {
   private usersSnapshotStarting = false;
 
   public startUsersSnapshot = async(collectionPath = ''): Promise<void> => {
+    console.log('startUsersSnapshot', collectionPath);
+    console.log(this.usersSnapshotStarting)
     if (!this.usersSnapshotStarting) {
+      console.log('startUsersSnapshot', collectionPath);
       this.usersSnapshotStarting = true;
       this.stopSnapshot("staged-users");
       this.state.users = {};
@@ -1425,7 +1663,7 @@ export const EdgeFirebase = class {
               collectionPath.replaceAll('/', '-')
             )
           )
-          const unsubscibe = await onSnapshot(q, (querySnapshot) => {
+          const unsubscribe = await onSnapshot(q, (querySnapshot) => {
             const items = {};
             querySnapshot.forEach((doc) => {
               const user = doc.data();
@@ -1465,7 +1703,31 @@ export const EdgeFirebase = class {
             });
             this.state.users = items;
           });
-          this.unsubscibe["staged-users"] = unsubscibe;
+          this.unsubscribe["staged-users"] = unsubscribe;
+        } else {
+          const q = query(
+            collection(this.db, "public-users"),
+            where(
+              "collectionPaths",
+              "array-contains",
+              collectionPath.replaceAll('/', '-')
+            )
+          )
+          const unsubscribe = await onSnapshot(q, (querySnapshot) => {
+            const items = {};
+            querySnapshot.forEach((doc) => {
+              const user = doc.data();
+              const docId = doc.id;
+              const item = {
+                docId,
+                meta: user.meta,
+                userId: user.userId,
+              }
+              items[doc.id] = item;
+            });
+            this.state.users = items;
+          });
+          this.unsubscribe["staged-users"] = unsubscribe;
         }
       }
     };
@@ -1489,7 +1751,7 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1492",
         meta: {}
       });
     } else {
@@ -1520,7 +1782,7 @@ export const EdgeFirebase = class {
       });
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1523",
         meta: {}
       });
     } else {
@@ -1556,7 +1818,7 @@ export const EdgeFirebase = class {
         });
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 1559",
           meta: {}
         });
       } else {
@@ -1599,7 +1861,7 @@ export const EdgeFirebase = class {
             uid: this.user.uid } );
           return this.sendResponse({
             success: true,
-            message: "",
+            message: "line 1602",
             meta: {}
           });
         } else {
@@ -1634,7 +1896,7 @@ export const EdgeFirebase = class {
       await deleteDoc(doc(this.db, "collection-data", collectionPath.replaceAll("/", "-")));
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1637",
         meta: {}
       });
     } else {
@@ -1679,7 +1941,7 @@ export const EdgeFirebase = class {
 
         return this.sendResponse({
           success: true,
-          message: "",
+          message: "line 1682",
           meta: {}
         });
       } else {
@@ -1728,7 +1990,7 @@ export const EdgeFirebase = class {
       await updateDoc(doc(this.db, collectionPath, docId), cloneItem);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1731",
         meta: {}
       });
     }
@@ -1751,7 +2013,7 @@ export const EdgeFirebase = class {
     }
     return this.sendResponse({
       success: true,
-      message: "",
+      message: "line 1754",
       meta: {}
     });
   }
@@ -1788,7 +2050,7 @@ export const EdgeFirebase = class {
       await setDoc(doc(this.db, collectionPath, docId), cloneItem);
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1791",
         meta: {docId}
       });
     } else {
@@ -1816,7 +2078,7 @@ export const EdgeFirebase = class {
       );
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "1819",
         meta: {docId: docRef.id}
       });
     }
@@ -1839,7 +2101,7 @@ export const EdgeFirebase = class {
       await deleteDoc(doc(this.db, collectionPath, docId));
       return this.sendResponse({
         success: true,
-        message: "",
+        message: "line 1842",
         meta: {}
       });
     } else {
@@ -1852,9 +2114,9 @@ export const EdgeFirebase = class {
   };
 
   public stopSnapshot = (collectionPath: string): void => {
-    if (this.unsubscibe[collectionPath] instanceof Function) {
-      this.unsubscibe[collectionPath]();
-      this.unsubscibe[collectionPath] = null;
+    if (this.unsubscribe[collectionPath] instanceof Function) {
+      this.unsubscribe[collectionPath]();
+      this.unsubscribe[collectionPath] = null;
     }
   };
 };

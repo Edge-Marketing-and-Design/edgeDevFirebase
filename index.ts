@@ -1,7 +1,7 @@
 import { EdgeFirebase } from "./edgeFirebase";
 export default {
-  install: (app, options, isPersistant) => {
-    const eFb = new EdgeFirebase(options, isPersistant);
+  install: (app, options, isPersistant, enablePopupRedirect) => {
+    const eFb = new EdgeFirebase(options, isPersistant, enablePopupRedirect);
     app.provide("edgeFirebase", eFb);
   }
 };
