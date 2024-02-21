@@ -210,12 +210,12 @@ export const EdgeFirebase = class {
       this.auth = initializeAuth(this.app, { persistence });
     }
     if (this.firebaseConfig.emulatorAuth) {
-      connectAuthEmulator(this.auth, `http://localhost:${this.firebaseConfig.emulatorAuth}`)
+      connectAuthEmulator(this.auth, `http://127.0.0.1:${this.firebaseConfig.emulatorAuth}`)
     }
 
     this.db = getFirestore(this.app);
     if (this.firebaseConfig.emulatorFirestore) {
-      connectFirestoreEmulator(this.db, "localhost", this.firebaseConfig.emulatorFirestore)
+      connectFirestoreEmulator(this.db, "127.0.0.1", this.firebaseConfig.emulatorFirestore)
     }
 
     if (this.firebaseConfig.measurementId) {
@@ -224,7 +224,7 @@ export const EdgeFirebase = class {
 
     this.functions = getFunctions(this.app);
     if (this.firebaseConfig.emulatorFunctions) {
-      connectFunctionsEmulator(this.functions, "localhost", this.firebaseConfig.emulatorFunctions)
+      connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
     this.setOnAuthStateChanged();
   }
