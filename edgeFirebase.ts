@@ -59,6 +59,9 @@ import {
   updateProfile,
 } from "firebase/auth";
 
+import { getStorage, ref as storageRef, uploadBytes, listAll, getDownloadURL, deleteObject } from "firebase/storage";
+
+
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
 import { getAnalytics, logEvent } from "firebase/analytics";
@@ -238,6 +241,10 @@ export const EdgeFirebase = class {
       this.anaytics = getAnalytics(this.app);
     }
 
+    if (this.firebaseConfig.storageBucket) {
+      this.storage = getStorage(this.app);
+    }
+
     this.functions = getFunctions(this.app);
     if (this.firebaseConfig.emulatorFunctions) {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
@@ -250,6 +257,7 @@ export const EdgeFirebase = class {
   public app = null;
   public auth = null;
   public db = null;
+  public storage = null;
 
   private anaytics = null;
 
@@ -2119,4 +2127,48 @@ export const EdgeFirebase = class {
       this.unsubscribe[collectionPath] = null;
     }
   };
+  // Firestore Storage
+  // Upload a file
+  async uploadFileToStorage(filePath, file) {
+    const canWrite = await this.permissionCheck("write", filePath);
+    if (!canWrite) {
+      return { success: false, message: "Permission denied" };
+    }
+    const storagePath = storageRef(this.storage, filePath);
+    await uploadBytes(storagePath, file);
+    return { success: true, message: "File uploaded successfully" };
+  }
+
+  // List all files in a directory
+  async listFilesInStorage(directoryPath) {
+    const canRead = await this.permissionCheck("read", directoryPath);
+    if (!canRead) {
+      return { success: false, message: "Permission denied" };
+    }
+    const dirRef = storageRef(this.storage, directoryPath);
+    const fileList = await listAll(dirRef);
+    return { success: true, files: fileList.items.map(item => item.fullPath) };
+  }
+
+  // Download a file
+  async downloadFileFromStorage(filePath) {
+    const canRead = await this.permissionCheck("read", filePath);
+    if (!canRead) {
+      return { success: false, message: "Permission denied" };
+    }
+    const fileRef = storageRef(this.storage, filePath);
+    const downloadUrl = await getDownloadURL(fileRef);
+    return { success: true, url: downloadUrl };
+  }
+
+  // Delete a file
+  async deleteFileFromStorage(filePath) {
+    const canDelete = await this.permissionCheck("delete", filePath);
+    if (!canDelete) {
+      return { success: false, message: "Permission denied" };
+    }
+    const fileRef = storageRef(this.storage, filePath);
+    await deleteObject(fileRef);
+    return { success: true, message: "File deleted successfully" };
+  }
 };
