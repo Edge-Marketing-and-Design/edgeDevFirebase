@@ -2161,7 +2161,7 @@ export const EdgeFirebase = class {
     return { success: true, url: downloadUrl };
   }
 
-  // Delete a file
+  // Delete a fileå
   async deleteFileFromStorage(filePath) {
     const canDelete = await this.permissionCheck("delete", filePath);
     if (!canDelete) {
