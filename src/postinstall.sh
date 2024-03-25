@@ -22,6 +22,25 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
   sed -e '1s/^/\/\/ #EDGE FIREBASE RULES START\n/' -e '$s/$/\n\/\/ #EDGE FIREBASE RULES END/' \
   >> "$project_root/firestore.rules";
 
+
+# Check if the destination file exists
+if [ ! -f "$project_root/storage.rules" ]; then
+  # If the file does not exist, create it and add the rules_version line
+  echo "rules_version = '2';" > "$project_root/storage.rules";
+fi
+
+# Ensure there's a newline at the end of the file
+[ "$(tail -c1 $project_root/storage.rules)" != "" ] && echo "" >> "$project_root/storage.rules"
+
+# Remove the existing block of rules between the markers
+sed -i.backup '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/d' "$project_root/storage.rules"
+
+# Extract the code block from the source file and append it to the destination file
+awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/storage.rules | \
+  sed '1d;$d' | \
+  sed -e '1s/^/\/\/ #EDGE FIREBASE RULES START\n/' -e '$s/$/\n\/\/ #EDGE FIREBASE RULES END/' \
+  >> "$project_root/storage.rules";
+
 if [ ! -d "$project_root/functions" ]; then
   mkdir "$project_root/functions"
 fi

@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-var-requires */
+/* eslint-disable no-undef */
 const functions = require('firebase-functions')
 const { PubSub } = require('@google-cloud/pubsub')
 const admin = require('firebase-admin')
@@ -10,6 +12,7 @@ const { onMessagePublished } = require('firebase-functions/v2/pubsub')
 
 const { onCall, HttpsError, onRequest } = require('firebase-functions/v2/https')
 const { onSchedule } = require('firebase-functions/v2/scheduler')
+const { Storage } = require('@google-cloud/storage')
 const {
   onDocumentWritten,
   onDocumentCreated,
@@ -42,5 +45,6 @@ module.exports = {
   admin,
   twilio,
   db,
+  Storage,
 }
 

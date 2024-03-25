@@ -48,19 +48,14 @@ import {
   OAuthProvider,
   browserPopupRedirectResolver,
   signInWithPopup,
-  signInWithPhoneNumber,
   sendSignInLinkToEmail,
-  updateEmail,
   verifyBeforeUpdateEmail,
-  RecaptchaVerifier,
-  ConfirmationResult,
-  PhoneAuthProvider,
   signInWithCustomToken,
   updateProfile,
 } from "firebase/auth";
 
-import { getStorage, ref as storageRef, uploadBytes, listAll, getDownloadURL, deleteObject } from "firebase/storage";
 
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL} from "firebase/storage";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
@@ -239,12 +234,10 @@ export const EdgeFirebase = class {
 
     if (this.firebaseConfig.measurementId) {
       this.anaytics = getAnalytics(this.app);
-    }
-
-    if (this.firebaseConfig.storageBucket) {
+    }  
+     if (this.firebaseConfig.storageBucket) {
       this.storage = getStorage(this.app);
     }
-
     this.functions = getFunctions(this.app);
     if (this.firebaseConfig.emulatorFunctions) {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
@@ -258,7 +251,6 @@ export const EdgeFirebase = class {
   public auth = null;
   public db = null;
   public storage = null;
-
   private anaytics = null;
 
   private functions = null;
@@ -2127,48 +2119,70 @@ export const EdgeFirebase = class {
       this.unsubscribe[collectionPath] = null;
     }
   };
-  // Firestore Storage
-  // Upload a file
-  async uploadFileToStorage(filePath, file) {
-    const canWrite = await this.permissionCheck("write", filePath);
-    if (!canWrite) {
-      return { success: false, message: "Permission denied" };
-    }
-    const storagePath = storageRef(this.storage, filePath);
-    await uploadBytes(storagePath, file);
-    return { success: true, message: "File uploaded successfully" };
-  }
 
-  // List all files in a directory
-  async listFilesInStorage(directoryPath) {
-    const canRead = await this.permissionCheck("read", directoryPath);
-    if (!canRead) {
-      return { success: false, message: "Permission denied" };
-    }
-    const dirRef = storageRef(this.storage, directoryPath);
-    const fileList = await listAll(dirRef);
-    return { success: true, files: fileList.items.map(item => item.fullPath) };
-  }
 
-  // Download a file
-  async downloadFileFromStorage(filePath) {
-    const canRead = await this.permissionCheck("read", filePath);
-    if (!canRead) {
-      return { success: false, message: "Permission denied" };
-    }
-    const fileRef = storageRef(this.storage, filePath);
-    const downloadUrl = await getDownloadURL(fileRef);
-    return { success: true, url: downloadUrl };
-  }
+  // File functions
+  public uploadFileToStorage = async (filePath: string, file: Blob): Promise<actionResponse> => {
+    try {
+      // Validate if file is provided
+      if (!file) {
+        return this.sendResponse({
+          success: false,
+          message: "No file provided for upload.",
+          meta: {}
+        });
+      }
 
-  // Delete a fileå
-  async deleteFileFromStorage(filePath) {
-    const canDelete = await this.permissionCheck("delete", filePath);
-    if (!canDelete) {
-      return { success: false, message: "Permission denied" };
+      // Check if the user has write permission to the filePath
+      const hasWritePermission = await this.permissionCheck("write", filePath);
+      if (!hasWritePermission) {
+        return this.sendResponse({
+          success: false,
+          message: "You do not have permission to upload files to this path.",
+          meta: {}
+        });
+      }
+
+      // Initialize Firebase Storage
+
+      // Define a temporary path for the file upload
+      // You might want to include some unique identifier in the temporary path
+      const tempFilePath = `temp/${this.user.uid}/${filePath.replaceAll('/', '-|-')}`;
+
+      // Create a reference to the temporary file location
+      const fileRef = storageRef(this.storage, tempFilePath);
+
+      // Upload the file to the temporary location
+      await uploadBytes(fileRef, file);
+
+      // Prepare data for the callable function
+      const data = {
+        uid: this.user.uid,
+        filePath: filePath, // The final desired path for the file
+      };
+
+      // Call the Firebase Function to handle the file move and any additional processing
+      const callable = httpsCallable(this.functions, 'edgeFirebase-uploadFile');
+      const functionResult = await callable(data);
+
+      const resultData = functionResult.data as { success: boolean; message: string; finalDownloadURL?: string };
+
+      if (!resultData.success) {
+        throw new Error(resultData.message);
+      }
+      // Return success response
+      return this.sendResponse({
+        success: true,
+        message: "File processed successfully.",
+        meta: {}
+      });
+    } catch (error) {
+      console.error(error);
+      return this.sendResponse({
+        success: false,
+        message: "An error occurred during file processing.",
+        meta: {}
+      });
     }
-    const fileRef = storageRef(this.storage, filePath);
-    await deleteObject(fileRef);
-    return { success: true, message: "File deleted successfully" };
-  }
+  };
 };
