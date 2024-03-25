@@ -55,7 +55,7 @@ import {
 } from "firebase/auth";
 
 
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL} from "firebase/storage";
+import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, connectStorageEmulator} from "firebase/storage";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
@@ -181,6 +181,7 @@ interface firebaseConfig {
   measurementId?: string;
   emulatorFirestore?: string;
   emulatorFunctions?: string;
+  emulatorStorage?: string;
 }
 
 interface actionResponse {
@@ -206,7 +207,8 @@ export const EdgeFirebase = class {
       measurementId: "",
       emulatorAuth: "",
       emulatorFirestore: "",
-      emulatorFunctions: ""
+      emulatorFunctions: "",
+      emulatorStorage: "",
     },
     isPersistant: false,
     enablePopupRedirect: false,
@@ -242,7 +244,9 @@ export const EdgeFirebase = class {
     if (this.firebaseConfig.emulatorFunctions) {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
-    this.setOnAuthStateChanged();
+    if (this.firebaseConfig.emulatorStorage) {
+      connectStorageEmulator(this.storage,  "127.0.0.1", this.firebaseConfig.emulatorStorage)
+    }
   }
 
   private firebaseConfig = null;

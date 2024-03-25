@@ -60,12 +60,12 @@ if [ ! -f "$project_root/functions/.env.prod" ]; then
   cp ./src/.env.prod "$project_root/functions/.env.prod"
 fi
 
-if [ ! -f "$project_root/.env.development" ]; then
-  cp ./src/.env.development "$project_root/.env.development"
+if [ ! -f "$project_root/.env.dev" ]; then
+  cp ./src/.env.development "$project_root/.env.dev"
 fi
 
-if [ ! -f "$project_root/.env.production" ]; then
-  cp ./src/.env.production "$project_root/.env.production"
+if [ ! -f "$project_root/.env" ]; then
+  cp ./src/.env.production "$project_root/.env"
 fi
 
 if [ ! -f "$project_root/functions/package.json" ]; then
