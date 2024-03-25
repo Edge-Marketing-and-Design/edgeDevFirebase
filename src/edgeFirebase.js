@@ -1,11 +1,10 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 /* eslint-disable no-undef */
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub } = require('./config.js')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
 const systemNumber = process.env.TWILIO_SYSTEM_NUMBER
-
 
 function formatPhoneNumber(phone) {
   // Remove non-numeric characters from the phone number
@@ -14,119 +13,116 @@ function formatPhoneNumber(phone) {
   return `+1${numericPhone}`
 }
 
-
-
 // File functions:
 
-//TODO: NEED TO WRITE WRAPPERS FOR THESE IN THE edgeFirebase.js file... UPLOAD has to do alot more... upload needs to acutall upload the file to firestorage... get the path, then pass it to the uploadFile function...
-//TODO: the uploadFile funntion needs to delete the file if they don't have permission to write to the path... 
-
-const bucketName = process.env.BUCKET_NAME
-const storage = new Storage();
+const bucketName = process.env.STORAGE_BUCKET
+const storage = new Storage()
 const bucket = storage.bucket(bucketName)
 
 exports.uploadFile = onCall(async (request) => {
   const auth = request.auth
   if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.');
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
   }
-  const tempFilesPath = `temp/${auth.uid}/`;
-  const [files] = await bucket.getFiles({ prefix: tempFilesPath });
+  const tempFilesPath = `temp/${auth.uid}/`
+  const [files] = await bucket.getFiles({ prefix: tempFilesPath })
   for (const file of files) {
-    const originalFilePath = file.name.replace(/-\|-/g, '/');
-    const hasWritePermission = await permissionCheck(auth.uid, "write", originalFilePath);
+    const originalFilePath = file.name.replace(/-\|-/g, '/')
+    const hasWritePermission = await this.permissionCheck(auth.uid, 'write', originalFilePath)
     if (hasWritePermission) {
       // Move file to the new path
-      await bucket.file(file.name).move(originalFilePath);
-    } else {
+      await bucket.file(file.name).move(originalFilePath)
+    }
+    else {
       // Delete the file if no write permission
-      await bucket.file(file.name).delete();
+      await bucket.file(file.name).delete()
     }
   }
-});
+})
 
 exports.downloadFile = onCall(async (request) => {
-  const data = request.data;
+  const data = request.data
   const auth = request.auth
   if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.');
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
   }
   // Permission check for downloading the specified file
-  const canRead = await permissionCheck(auth.uid, "read", data.filePath);
+  const canRead = await this.permissionCheck(auth.uid, 'read', data.filePath)
   if (!canRead) {
-    throw new HttpsError('permission-denied', 'You do not have permission to download this file.');
+    throw new HttpsError('permission-denied', 'You do not have permission to download this file.')
   }
 
   const options = {
     version: 'v4',
     action: 'read',
     expires: Date.now() + 5 * 60 * 1000, // 5 minutes
-  };
+  }
 
   try {
-    const [url] = await bucket.file(data.filePath).getSignedUrl(options);
-    return { success: true, url };
-  } catch (error) {
-    logger.error(error);
-    throw new HttpsError('internal', 'Unable to generate download URL.');
+    const [url] = await bucket.file(data.filePath).getSignedUrl(options)
+    return { success: true, url }
   }
-});
+  catch (error) {
+    logger.error(error)
+    throw new HttpsError('internal', 'Unable to generate download URL.')
+  }
+})
 
 exports.listFiles = onCall(async (request) => {
   // Validate user authentication
   const data = request.data
   const auth = request.auth
   if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.');
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
   }
 
   // Permission check for reading the specified directory
-  const canRead = await permissionCheck(auth.uid, "read", data.directoryPath);
+  const canRead = await this.permissionCheck(auth.uid, 'read', data.directoryPath)
   if (!canRead) {
-    throw new HttpsError('permission-denied', 'You do not have permission to list files in this directory.');
+    throw new HttpsError('permission-denied', 'You do not have permission to list files in this directory.')
   }
 
   try {
-    const [files] = await bucket.getFiles({ prefix: data.directoryPath });
-    const fileList = files.map(file => file.name);
-    return { success: true, fileList };
-  } catch (error) {
-    logger.error(error);
-    throw new HttpsError('internal', 'Unable to list files.');
+    const [files] = await bucket.getFiles({ prefix: data.directoryPath })
+    const fileList = files.map(file => file.name)
+    return { success: true, fileList }
   }
-});
-
+  catch (error) {
+    logger.error(error)
+    throw new HttpsError('internal', 'Unable to list files.')
+  }
+})
 
 exports.deleteFile = onCall(async (request) => {
   // Validate user authentication
   const data = request.data
   const auth = request.auth
   if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.');
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
   }
 
   // Extract filePath from the request data
-  const filePath = data.filePath;
+  const filePath = data.filePath
 
   // Perform permission check for deleting the specified file
-  const canDelete = await permissionCheck(auth.uid, "delete", filePath);
+  const canDelete = await this.permissionCheck(auth.uid, 'delete', filePath)
   if (!canDelete) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to delete this file.');
+    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to delete this file.')
   }
 
   try {
     // Specify your bucket name
-    await storage.bucket(bucketName).file(filePath).delete();
+    await storage.bucket(bucketName).file(filePath).delete()
 
-    return { success: true, message: "File successfully deleted." };
-  } catch (error) {
-    console.error("Error deleting file:", error);
-    throw new functions.https.HttpsError('internal', 'Failed to delete file.');
+    return { success: true, message: 'File successfully deleted.' }
   }
-});
+  catch (error) {
+    console.error('Error deleting file:', error)
+    throw new functions.https.HttpsError('internal', 'Failed to delete file.')
+  }
+})
 
-//end file functions
-
+// end file functions
 
 exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
   const queuedTopicsRef = db.collection('topic-queue')
@@ -178,7 +174,7 @@ exports.sendVerificationCode = onCall(async (request) => {
   const data = request.data
   let code = (Math.floor(Math.random() * 1000000) + 1000000).toString().substring(1)
   const phone = formatPhoneNumber(data.phone)
-  
+
   if (phone === '+19999999999') {
     code = '123456'
   }
