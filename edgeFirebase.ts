@@ -245,8 +245,9 @@ export const EdgeFirebase = class {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
     if (this.firebaseConfig.emulatorStorage) {
-      connectStorageEmulator(this.storage,  "127.0.0.1", this.firebaseConfig.emulatorStorage)
+      connectStorageEmulator(this.storage, "127.0.0.1", this.firebaseConfig.emulatorStorage)
     }
+    this.setOnAuthStateChanged();
   }
 
   private firebaseConfig = null;
