@@ -3,11 +3,14 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     // Match the file path structure you're using, simulating the Firestore document path structure for permissions.
-    function getRolePermission(role, collection, permissionCheck) {
-        let pathCollectionPermissions = firestore.get(/databases/(default)/documents/collection-data/$(collection)).data;
-        let defaultPermissions = firestore.get(/databases/(default)/documents/collection-data/-default-).data;
-        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
-              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
+    function getRolePermission(role, permissionCheck) {
+      let permissions = {
+        'admin': {'assign': true, 'delete': true, 'read': true, 'write': true},
+        'editor': {'assign': false, 'delete': true, 'read': true, 'write': true},
+        'user': {'assign': false, 'delete': false, 'read': true, 'write': false},
+        'writer': {'assign': false, 'delete': false, 'read': true, 'write': true}
+      };
+      return permissions[role][permissionCheck];
     }
     function checkPermission(permissionCheck, collectionPath) {
       let user = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
@@ -23,7 +26,7 @@ service firebase.storage {
                 (
                   "roles" in user &&
                   ruleHelper[collectionPath].permissionCheckPath in user.roles &&
-                  getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, ruleHelper[collectionPath].permissionCheckPath, permissionCheck)
+                  getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, permissionCheck)
                 ) ||
                 (
                   "specialPermissions" in user &&
