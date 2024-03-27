@@ -13,116 +13,31 @@ function formatPhoneNumber(phone) {
   return `+1${numericPhone}`
 }
 
-// File functions:
+const permissionCheck = async (userId, action, originalFilePath) => {
+  // Fetch user document
+  const collectionPath = originalFilePath.replace(/\//g, '-')
+  const userDoc = await db.collection('users').doc(userId).get()
+  const userData = userDoc.data()
 
-const bucketName = process.env.STORAGE_BUCKET
-const storage = new Storage()
-const bucket = storage.bucket(bucketName)
+  // Fetch roles from user data
+  const roles = Object.values(userData.roles || {})
 
-exports.uploadFile = onCall(async (request) => {
-  const auth = request.auth
-  if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
-  }
-  const tempFilesPath = `temp/${auth.uid}/`
-  const [files] = await bucket.getFiles({ prefix: tempFilesPath })
-  for (const file of files) {
-    const originalFilePath = file.name.replace(/-\|-/g, '/')
-    const hasWritePermission = await this.permissionCheck(auth.uid, 'write', originalFilePath)
-    if (hasWritePermission) {
-      // Move file to the new path
-      await bucket.file(file.name).move(originalFilePath)
-    }
-    else {
-      // Delete the file if no write permission
-      await bucket.file(file.name).delete()
+  for (const role of roles) {
+    // Check if the role's collectionPath is a prefix of the collectionPath
+    if (collectionPath.startsWith(role.collectionPath)) {
+      // Fetch collection data
+      const collectionDoc = await db.collection('collection-data').doc(role.collectionPath).get()
+      const collectionData = collectionDoc.exists ? collectionDoc.data() : await db.collection('collection-data').doc('-default-').get().then(doc => doc.data())
+
+      // Check if action is permitted
+      if (collectionData && collectionData[role.role] && collectionData[role.role][action]) {
+        return true
+      }
     }
   }
-})
-
-exports.downloadFile = onCall(async (request) => {
-  const data = request.data
-  const auth = request.auth
-  if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
-  }
-  // Permission check for downloading the specified file
-  const canRead = await this.permissionCheck(auth.uid, 'read', data.filePath)
-  if (!canRead) {
-    throw new HttpsError('permission-denied', 'You do not have permission to download this file.')
-  }
-
-  const options = {
-    version: 'v4',
-    action: 'read',
-    expires: Date.now() + 5 * 60 * 1000, // 5 minutes
-  }
-
-  try {
-    const [url] = await bucket.file(data.filePath).getSignedUrl(options)
-    return { success: true, url }
-  }
-  catch (error) {
-    logger.error(error)
-    throw new HttpsError('internal', 'Unable to generate download URL.')
-  }
-})
-
-exports.listFiles = onCall(async (request) => {
-  // Validate user authentication
-  const data = request.data
-  const auth = request.auth
-  if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
-  }
-
-  // Permission check for reading the specified directory
-  const canRead = await this.permissionCheck(auth.uid, 'read', data.directoryPath)
-  if (!canRead) {
-    throw new HttpsError('permission-denied', 'You do not have permission to list files in this directory.')
-  }
-
-  try {
-    const [files] = await bucket.getFiles({ prefix: data.directoryPath })
-    const fileList = files.map(file => file.name)
-    return { success: true, fileList }
-  }
-  catch (error) {
-    logger.error(error)
-    throw new HttpsError('internal', 'Unable to list files.')
-  }
-})
-
-exports.deleteFile = onCall(async (request) => {
-  // Validate user authentication
-  const data = request.data
-  const auth = request.auth
-  if (data.uid !== auth.uid) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to upload files for this user.')
-  }
-
-  // Extract filePath from the request data
-  const filePath = data.filePath
-
-  // Perform permission check for deleting the specified file
-  const canDelete = await this.permissionCheck(auth.uid, 'delete', filePath)
-  if (!canDelete) {
-    throw new functions.https.HttpsError('permission-denied', 'You do not have permission to delete this file.')
-  }
-
-  try {
-    // Specify your bucket name
-    await storage.bucket(bucketName).file(filePath).delete()
-
-    return { success: true, message: 'File successfully deleted.' }
-  }
-  catch (error) {
-    console.error('Error deleting file:', error)
-    throw new functions.https.HttpsError('internal', 'Failed to delete file.')
-  }
-})
-
-// end file functions
+  // If no permission found, return false
+  return false
+}
 
 exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
   const queuedTopicsRef = db.collection('topic-queue')
@@ -369,32 +284,6 @@ exports.checkOrgIdExists = onCall(async (request) => {
   const orgDoc = await db.collection('organizations').doc(orgId).get()
   return { exists: orgDoc.exists }
 })
-
-const permissionCheck = async (userId, action, collectionPath) => {
-  // Fetch user document
-  const userDoc = await db.collection('users').doc(userId).get()
-  const userData = userDoc.data()
-
-  // Fetch roles from user data
-  const roles = userData.roles || []
-
-  // Check each role for permission
-  for (const role of roles) {
-    if (role.collectionPath === collectionPath) {
-      // Fetch collection data
-      const collectionDoc = await db.collection('collection-data').doc(collectionPath).get()
-      const collectionData = collectionDoc.exists ? collectionDoc.data() : await db.collection('collection-data').doc('-default-').get().then(doc => doc.data())
-
-      // Check if action is permitted
-      if (collectionData && collectionData[role.role] && collectionData[role.role][action]) {
-        return true
-      }
-    }
-  }
-
-  // If no permission found, return false
-  return false
-}
 
 exports.deleteSelf = onCall(async (request) => {
   if (request.data.uid === request.auth.uid) {

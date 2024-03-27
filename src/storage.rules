@@ -2,17 +2,44 @@ rules_version = '2';
 // #EDGE FIREBASE RULES START
 service firebase.storage {
   match /b/{bucket}/o {
-    // Deny read access to all paths
-    match /{allPaths=**} {
-      allow read: if false;
+    // Match the file path structure you're using, simulating the Firestore document path structure for permissions.
+    function getRolePermission(role, collection, permissionCheck) {
+        let pathCollectionPermissions = firestore.get(/databases/(default)/documents/collection-data/$(collection)).data;
+        let defaultPermissions = firestore.get(/databases/(default)/documents/collection-data/-default-).data;
+        return (role in pathCollectionPermissions && pathCollectionPermissions[role][permissionCheck]) ||
+              (role in defaultPermissions && defaultPermissions[role][permissionCheck]);
     }
-    // Allow write access only to paths matching /temp/{userId}/{anyPath=**}
-    // {userId} is a placeholder for the actual user ID
-    // {anyPath=**} matches any file path under /temp/{userId}/
-    match /temp/{userId}/{anyPath=**} {
-      allow write: if request.auth != null && request.auth.uid == userId;
-      // Keep read access denied
-      allow read: if false;
+    function checkPermission(permissionCheck, collectionPath) {
+      let user = firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data;
+      let ruleHelper = firestore.get(/databases/(default)/documents/rule-helpers/$(request.auth.uid)).data;
+      return  request.auth != null &&
+              collectionPath in ruleHelper &&
+              "permissionCheckPath" in ruleHelper[collectionPath] &&
+              (
+                ruleHelper[collectionPath].permissionCheckPath == "-" ||
+                collectionPath.matches("^" + ruleHelper[collectionPath].permissionCheckPath + ".*$")
+              ) &&
+              (
+                (
+                  "roles" in user &&
+                  ruleHelper[collectionPath].permissionCheckPath in user.roles &&
+                  getRolePermission(user.roles[ruleHelper[collectionPath].permissionCheckPath].role, ruleHelper[collectionPath].permissionCheckPath, permissionCheck)
+                ) ||
+                (
+                  "specialPermissions" in user &&
+                  ruleHelper[collectionPath].permissionCheckPath in user.specialPermissions &&
+                  permissionCheck in user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath] &&
+                  user.specialPermissions[ruleHelper[collectionPath].permissionCheckPath][permissionCheck]
+                )
+              );
+    }
+    match /{dir}/{fileId} {
+      // General read permission check based on Firestore data
+      allow read: if checkPermission("read", dir);
+      // General write permission check, including creating and updating files
+      allow write: if checkPermission("write", dir);
+      // General delete permission check
+      allow delete: if checkPermission("write", dir);
     }
   }
 }

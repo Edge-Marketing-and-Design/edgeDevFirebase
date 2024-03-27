@@ -55,7 +55,7 @@ import {
 } from "firebase/auth";
 
 
-import { getStorage, ref as storageRef, uploadBytes, getDownloadURL, connectStorageEmulator} from "firebase/storage";
+import { getStorage, ref, uploadBytes, getDownloadURL, connectStorageEmulator, listAll, deleteObject} from "firebase/storage";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
@@ -245,8 +245,9 @@ export const EdgeFirebase = class {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
     if (this.firebaseConfig.emulatorStorage) {
-      connectStorageEmulator(this.storage,  "127.0.0.1", this.firebaseConfig.emulatorStorage)
+      connectStorageEmulator(this.storage, "127.0.0.1", this.firebaseConfig.emulatorStorage)
     }
+    this.setOnAuthStateChanged();
   }
 
   private firebaseConfig = null;
@@ -2126,8 +2127,8 @@ export const EdgeFirebase = class {
 
 
   // File functions
-  public uploadFileToStorage = async (filePath: string, file: Blob): Promise<actionResponse> => {
-    try {
+  public uploadFile = async (filePath: string, file: Blob): Promise<actionResponse> => {
+
       // Validate if file is provided
       if (!file) {
         return this.sendResponse({
@@ -2147,46 +2148,83 @@ export const EdgeFirebase = class {
         });
       }
 
-      // Initialize Firebase Storage
-
-      // Define a temporary path for the file upload
-      // You might want to include some unique identifier in the temporary path
-      const tempFilePath = `temp/${this.user.uid}/${filePath.replaceAll('/', '-|-')}`;
-
-      // Create a reference to the temporary file location
-      const fileRef = storageRef(this.storage, tempFilePath);
-
-      // Upload the file to the temporary location
-      await uploadBytes(fileRef, file);
-
-      // Prepare data for the callable function
-      const data = {
-        uid: this.user.uid,
-        filePath: filePath, // The final desired path for the file
-      };
-
-      // Call the Firebase Function to handle the file move and any additional processing
-      const callable = httpsCallable(this.functions, 'edgeFirebase-uploadFile');
-      const functionResult = await callable(data);
-
-      const resultData = functionResult.data as { success: boolean; message: string; finalDownloadURL?: string };
-
-      if (!resultData.success) {
-        throw new Error(resultData.message);
+      try {
+        const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + file.name;
+        const fileRef = ref(this.storage, tempFilePath);
+        await uploadBytes(fileRef, file);
+        return this.sendResponse({
+          success: true,
+          message: "File uploaded successfully.",
+          meta: {}
+        });
+      } catch (error) {
+        return this.sendResponse({
+          success: false,
+          message: "An error occurred during file upload.",
+          meta: {}
+        });
       }
-      // Return success response
+  };
+
+  public deleteFile = async (filePath: string): Promise<actionResponse> => {
+    const hasDeletePermission = await this.permissionCheck("write", filePath);
+    if (!hasDeletePermission) {
+      return this.sendResponse({
+        success: false,
+        message: "You do not have permission to delete files in this path.",
+        meta: {}
+      });
+    }
+    try {
+      const fileRef = ref(this.storage, filePath);
+      await deleteObject(fileRef);
       return this.sendResponse({
         success: true,
-        message: "File processed successfully.",
+        message: "File deleted successfully.",
         meta: {}
       });
     } catch (error) {
-      console.error(error);
       return this.sendResponse({
         success: false,
-        message: "An error occurred during file processing.",
+        message: "An error occurred during file deletion.",
         meta: {}
       });
     }
   };
+
+  public listFiles = async (filePath: string): Promise<actionResponse> => {
+    const hasReadPermission = await this.permissionCheck("read", filePath);
+    if (!hasReadPermission) {
+      return this.sendResponse({
+        success: false,
+        message: "You do not have permission to list files in this path.",
+        meta: {}
+      });
+    }
+  
+    try {
+      const listRef = ref(this.storage, filePath.replaceAll('/', '-'));
+      const listResult = await listAll(listRef);
+      const filesPromises = listResult.items.map(async (item) => {
+        const downloadURL = await getDownloadURL(item);
+        return {
+          fileName: item.name,
+          fullPath: item.fullPath, // Assuming fullPath is a property available on the item
+          downloadURL: downloadURL
+        };
+      });
+      const files = await Promise.all(filesPromises);
+      return this.sendResponse({
+        success: true,
+        message: "Files listed successfully.",
+        meta: { files }
+      });
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: "An error occurred while listing files.",
+        meta: {}
+      });
+    }
+  }
 };
