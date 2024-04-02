@@ -349,64 +349,6 @@ export const EdgeFirebase = class {
     this.unsubscribe.userMeta = metaUnsubscribe;
   };
 
-  private startCollectionPermissionsSync = async (): Promise<void> => {
-    // TODO: In future get roles from user and only sync those collections 
-    // Perhaps by getting all "first segments" and get all that start with that
-    const q = this.getQuery('collection-data');
-    const docs = await getDocs(q);
-    let items = {}
-    docs.forEach((doc) => {
-      const item = doc.data();
-      item.docId = doc.id;
-      items[doc.id] = item;
-    });
-    this.state.collectionPermissions = items;
-    if (!this.state.collectionPermissions['-default-']) {
-      const collectionItem = {
-        collectionPath:  '-default-',
-        docId: '-default-',
-        admin: {
-          assign: true,
-          read: true,
-          write: true,
-          delete: true
-        },
-        editor: {
-          assign: false,
-          read: true,
-          write: true,
-          delete: true
-        },
-        writer: {
-          assign: false,
-          read: true,
-          write: true,
-          delete: false
-        },
-        user: {
-          assign: false,
-          read: true,
-          write: false,
-          delete: false
-        }
-      };
-      await setDoc(
-        doc(this.db, "collection-data", "-default-"),
-        collectionItem
-      );
-    }
-    this.stopSnapshot('collection-data');
-    const unsubscribe = onSnapshot(q, (querySnapshot) => {
-      items = {};
-      querySnapshot.forEach((doc) => {
-        const item = doc.data();
-        item.docId = doc.id;
-        items[doc.id] = item;
-      });
-      this.state.collectionPermissions = items;
-    });
-    this.unsubscribe['collection-data'] = unsubscribe
-  }
 
   private ruleHelperReset = async (): Promise<void> => {
     const initRoleHelper = { uid: this.user.uid, 'edge-assignment-helper': {permissionType: "roles"} }
@@ -417,7 +359,6 @@ export const EdgeFirebase = class {
   private startUserMetaSync = async (docSnap): Promise<void> => {
     // Took this out because if another client is logged in, it breaks the other client
     // await this.ruleHelperReset();
-    await this.startCollectionPermissionsSync()
     await this.initUserMetaPermissions(docSnap);
     this.user.loggedIn = true;
     this.user.loggingIn = false;
@@ -1060,6 +1001,8 @@ export const EdgeFirebase = class {
     this.state.ruleHelpers[ruleKey] = ruleCheck;
   }
 
+
+
   public permissionCheckOnly = (action: action, collectionPath: string): boolean => {
     const collection = collectionPath.replaceAll("-", "/").split("/");
     let index = collection.length;
@@ -1079,10 +1022,12 @@ export const EdgeFirebase = class {
         );
 
         if (role) {
-          permissionData = this.getCollectionPermissions(
-            permissionCheck,
-            role.role
-          );
+          permissionData = this.state.permissions[role.role] || {
+            read: false,
+            write: false,
+            delete: false,
+            assign: false
+          };
         }
         const specialPermission = this.user.specialPermissions.find(
           (r) => r.collectionPath === permissionCheck
@@ -1096,10 +1041,12 @@ export const EdgeFirebase = class {
     if (!permissionData[action]) {
       const rootRole = this.user.roles.find((r) => r.collectionPath === "-");
       if (rootRole) {
-        permissionData = this.getCollectionPermissions(
-          "-",
-          rootRole.role
-        );
+        permissionData = this.state.permissions[rootRole.role] || {
+          read: false,
+          write: false,
+          delete: false,
+          assign: false
+        };
       }
       const rootSpecialPermission = this.user.specialPermissions.find(
         (r) => r.collectionPath === "-"
@@ -1120,32 +1067,6 @@ export const EdgeFirebase = class {
       await this.setRuleHelper(collectionPath, action);
     }
     return check;
-  };
-
-  private getCollectionPermissions = (
-    collectionPath: string,
-    role: string
-  ): permissions => {
-    if (Object.prototype.hasOwnProperty.call(this.state.collectionPermissions, collectionPath)) {
-      if (Object.prototype.hasOwnProperty.call(this.state.collectionPermissions[collectionPath], role)) {
-        const permissionData = this.state.collectionPermissions[collectionPath][role];
-        return {
-          read: permissionData.read,
-          write: permissionData.write,
-          delete: permissionData.delete,
-          assign: permissionData.assign
-        };
-      }
-    }
-    if (Object.prototype.hasOwnProperty.call(this.state.collectionPermissions, '-default-')) {
-      return this.state.collectionPermissions['-default-'][role];
-    }
-    return {
-      read: false,
-      write: false,
-      delete: false,
-      assign: false
-    };
   };
 
   private generateUserMeta = async (userMeta: newUser): Promise<actionResponse> => {
@@ -1277,7 +1198,12 @@ export const EdgeFirebase = class {
   });
 
   public state = reactive({
-    collectionPermissions: {},
+   permissions: {
+      'admin': {'assign': true, 'delete': true, 'read': true, 'write': true},
+      'editor': {'assign': false, 'delete': true, 'read': true, 'write': true},
+      'user': {'assign': false, 'delete': false, 'read': true, 'write': false},
+      'writer': {'assign': false, 'delete': false, 'read': true, 'write': true}
+    },
     users: {},
     registrationCode: "",
     registrationMeta: {},

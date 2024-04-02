@@ -26,6 +26,41 @@ const { getFirestore } = require('firebase-admin/firestore')
 const twilio = require('twilio')
 const db = getFirestore()
 
+// The permissionCheck function
+
+const permissions = {
+  'admin': {'assign': true, 'delete': true, 'read': true, 'write': true},
+  'editor': {'assign': false, 'delete': true, 'read': true, 'write': true},
+  'user': {'assign': false, 'delete': false, 'read': true, 'write': false},
+  'writer': {'assign': false, 'delete': false, 'read': true, 'write': true}
+};
+
+const permissionCheck = async (userId, action, originalFilePath) => {
+  // Fetch user document
+  const collectionPath = originalFilePath.replace(/\//g, '-')
+  const userDoc = await db.collection('users').doc(userId).get()
+  if (!userDoc.exists) {
+    console.log('No such user!')
+    return false // Or handle as needed
+  }
+  const userData = userDoc.data()
+
+  // Fetch roles from user data
+  const roles = Object.values(userData.roles || {})
+
+  for (const role of roles) {
+    // Check if the role's collectionPath is a prefix of the collectionPath
+    if (collectionPath.startsWith(role.collectionPath)) {
+      // Use permissions object instead of fetching collection data
+      const rolePermissions = permissions[role.role];
+      if (rolePermissions && rolePermissions[action]) {
+        return true;
+      }
+    }
+  }
+  return false;
+}
+
 module.exports = {
   pubsub,
   onMessagePublished,
@@ -46,5 +81,7 @@ module.exports = {
   twilio,
   db,
   Storage,
+  permissionCheck,
 }
+
 

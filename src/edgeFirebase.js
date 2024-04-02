@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-var-requires */
 /* eslint-disable no-undef */
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage } = require('./config.js')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
@@ -11,32 +11,6 @@ function formatPhoneNumber(phone) {
   const numericPhone = phone.replace(/\D/g, '')
   // Return the formatted number
   return `+1${numericPhone}`
-}
-
-const permissionCheck = async (userId, action, originalFilePath) => {
-  // Fetch user document
-  const collectionPath = originalFilePath.replace(/\//g, '-')
-  const userDoc = await db.collection('users').doc(userId).get()
-  const userData = userDoc.data()
-
-  // Fetch roles from user data
-  const roles = Object.values(userData.roles || {})
-
-  for (const role of roles) {
-    // Check if the role's collectionPath is a prefix of the collectionPath
-    if (collectionPath.startsWith(role.collectionPath)) {
-      // Fetch collection data
-      const collectionDoc = await db.collection('collection-data').doc(role.collectionPath).get()
-      const collectionData = collectionDoc.exists ? collectionDoc.data() : await db.collection('collection-data').doc('-default-').get().then(doc => doc.data())
-
-      // Check if action is permitted
-      if (collectionData && collectionData[role.role] && collectionData[role.role][action]) {
-        return true
-      }
-    }
-  }
-  // If no permission found, return false
-  return false
 }
 
 exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
@@ -156,18 +130,8 @@ exports.verifyPhoneNumber = onCall(async (request) => {
 })
 
 exports.initFirestore = onCall(async (request) => {
-  // checks to see of the collections 'collection-data' and 'staged-users' exist if not will seed them with data
-  const collectionData = await db.collection('collection-data').get()
+  // checks to see of the collections 'staged-users' exist if not will seed them with data
   const stagedUsers = await db.collection('staged-users').get()
-  if (collectionData.empty) {
-    // create a document with the id of '-' and one called '-default-':
-    const admin = { assign: true, delete: true, read: true, write: true }
-    const editor = { assign: false, delete: true, read: true, write: true }
-    const writer = { assign: false, delete: false, read: true, write: true }
-    const user = { assign: false, delete: false, read: true, write: false }
-    await db.collection('collection-data').doc('-').set({ admin, editor, writer, user })
-    await db.collection('collection-data').doc('-default-').set({ admin, editor, writer, user })
-  }
   if (stagedUsers.empty) {
     const templateUser = {
       docId: 'organization-registration-template',
