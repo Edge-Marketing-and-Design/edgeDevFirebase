@@ -36,6 +36,11 @@ service firebase.storage {
                 )
               );
     }
+    match /public/{fileId} {
+      // Public directory with special rules
+      allow read: if true; // Unrestricted read access
+      allow write, delete: if request.auth != null; // Write and delete require authentication
+    }
     match /{dir}/{fileId} {
       // General read permission check based on Firestore data
       allow read: if checkPermission("read", dir);

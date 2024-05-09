@@ -2053,7 +2053,7 @@ export const EdgeFirebase = class {
 
 
   // File functions
-  public uploadFile = async (filePath: string, file: Blob): Promise<actionResponse> => {
+  public uploadFile = async (filePath: string, file: Blob, isPublic: boolean): Promise<actionResponse> => {
 
       // Validate if file is provided
       if (!file) {
@@ -2065,7 +2065,11 @@ export const EdgeFirebase = class {
       }
 
       // Check if the user has write permission to the filePath
-      const hasWritePermission = await this.permissionCheck("write", filePath);
+      let hasWritePermission = await this.permissionCheck("write", filePath);
+      if (isPublic) {
+        hasWritePermission = true;
+        filePath = "public";
+      }
       if (!hasWritePermission) {
         return this.sendResponse({
           success: false,
@@ -2075,13 +2079,21 @@ export const EdgeFirebase = class {
       }
 
       try {
-        const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + file.name;
+        let randomId = ''
+        if (isPublic) {
+          randomId = Math.random().toString(36).substring(2, 6) + '-'
+        }
+        const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + randomId + file.name;
         const fileRef = ref(this.storage, tempFilePath);
+        if (isPublic) {
+          await uploadBytes(fileRef, file, { contentType: file.type, cacheControl: 'public, max-age=31536000' });
+        } else {
         await uploadBytes(fileRef, file);
+        }
         return this.sendResponse({
           success: true,
           message: "File uploaded successfully.",
-          meta: {}
+          meta: {file: tempFilePath}
         });
       } catch (error) {
         return this.sendResponse({
@@ -2093,7 +2105,10 @@ export const EdgeFirebase = class {
   };
 
   public deleteFile = async (filePath: string): Promise<actionResponse> => {
-    const hasDeletePermission = await this.permissionCheck("write", filePath);
+    let hasDeletePermission = await this.permissionCheck("write", filePath);
+    if (filePath.substring(0, 6) === 'public') {
+      hasDeletePermission = true;
+    }
     if (!hasDeletePermission) {
       return this.sendResponse({
         success: false,
