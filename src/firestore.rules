@@ -31,6 +31,14 @@ service cloud.firestore {
     allow update: if false; 
     allow delete: if false; 
   }
+
+
+  match /databases/{database}/documents/system/{event} {
+    allow read: if false;
+    allow create: if false;  
+    allow update: if false; 
+    allow delete: if false; 
+  }
   
   match /databases/{database}/documents/rule-helpers/{helper} {
     allow read: if false;
