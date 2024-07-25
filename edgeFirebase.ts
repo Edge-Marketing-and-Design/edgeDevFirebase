@@ -197,7 +197,7 @@ interface permissionStatus {
 
 interface User {
   userId: string;
-  stagedDocId: string;
+  docId: string;
 }
 
 interface Meta {
@@ -818,7 +818,8 @@ export const EdgeFirebase = class {
       const users = Object.values(this.state.users)  as User[];
       const user = users.find((u) => u.userId === userId);
       if (user) {
-        stagedDocId = user.stagedDocId;
+        console.log(user)
+        stagedDocId = user.docId;
       } else {
         return this.sendResponse({
           success: false,
