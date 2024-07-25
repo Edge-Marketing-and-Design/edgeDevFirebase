@@ -195,6 +195,16 @@ interface permissionStatus {
   badCollectionPaths: string[];
 }
 
+interface User {
+  userId: string;
+  stagedDocId: string;
+}
+
+interface Meta {
+  [key: string]: unknown;
+}
+
+
 export const EdgeFirebase = class {
   constructor(
     firebaseConfig: firebaseConfig = {
@@ -800,11 +810,25 @@ export const EdgeFirebase = class {
     }
   };
 
-  public setUserMeta = async (meta: unknown): Promise<actionResponse> => {
-    //TODO: Change setUserMeta to also be used by someone with assign permissions and 
-    // add a permissionCheck here for it.
+
+
+  public setUserMeta = async (meta: Meta, userId = ''): Promise<actionResponse> => {
+    let stagedDocId = this.user.stagedDocId;
+    if (userId) {
+      const users = Object.values(this.state.users)  as User[];
+      const user = users.find((u) => u.userId === userId);
+      if (user) {
+        stagedDocId = user.stagedDocId;
+      } else {
+        return this.sendResponse({
+          success: false,
+          message: "You don't have access to change this user.",
+          meta: {}
+        });
+      }
+    }
     for (const [key, value] of Object.entries(meta)) {
-      await updateDoc(doc(this.db, "staged-users/" + this.user.stagedDocId), {
+      await updateDoc(doc(this.db, "staged-users/" + stagedDocId), {
         ["meta." + key]: value, uid: this.user.uid
       });
     }
