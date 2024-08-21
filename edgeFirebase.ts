@@ -2113,7 +2113,7 @@ export const EdgeFirebase = class {
         if (isPublic) {
           await uploadBytes(fileRef, file, { contentType: file.type, cacheControl: 'public, max-age=31536000' });
         } else {
-        await uploadBytes(fileRef, file);
+         await uploadBytes(fileRef, file);
         }
         return this.sendResponse({
           success: true,
