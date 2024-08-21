@@ -2082,76 +2082,82 @@ export const EdgeFirebase = class {
 
     // Validate if file is provided
     if (!file) {
-        return this.sendResponse({
-            success: false,
-            message: "No file provided for upload.",
-            meta: {}
-        });
+      return this.sendResponse({
+        success: false,
+        message: "No file provided for upload.",
+        meta: {}
+      });
     }
-
+  
     // Check if the user has write permission to the filePath
     let hasWritePermission = await this.permissionCheck("write", filePath);
     if (isPublic) {
-        hasWritePermission = true;
-        filePath = "public";
+      hasWritePermission = true;
+      filePath = "public";
     }
     if (!hasWritePermission) {
-        return this.sendResponse({
-            success: false,
-            message: "You do not have permission to upload files to this path.",
-            meta: {}
-        });
+      return this.sendResponse({
+        success: false,
+        message: "You do not have permission to upload files to this path.",
+        meta: {}
+      });
     }
-
+  
     try {
-        let randomId = '';
-        if (isPublic) {
-            randomId = Math.random().toString(36).substring(2, 6) + '-';
-        }
-        const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + randomId + file.name;
-        const storage = getStorage();
-        const fileRef = ref(storage, tempFilePath);
-
-        const metadata = {
-            contentType: file.type,
-            cacheControl: isPublic ? 'public, max-age=31536000' : undefined,
-        };
-
-        // Resumable upload
-        const uploadTask = uploadBytesResumable(fileRef, file, metadata);
-
-        // Monitor progress and handle completion
+      let randomId = '';
+      if (isPublic) {
+        randomId = Math.random().toString(36).substring(2, 6) + '-';
+      }
+      const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + randomId + file.name;
+      const storage = getStorage();
+      const fileRef = ref(storage, tempFilePath);
+  
+      const metadata = {
+        contentType: file.type,
+        cacheControl: isPublic ? 'public, max-age=31536000' : undefined,
+      };
+  
+      // Resumable upload
+      const uploadTask = uploadBytesResumable(fileRef, file, metadata);
+  
+      // Wrap the upload task in a Promise
+      const uploadPromise = new Promise<actionResponse>((resolve, reject) => {
         uploadTask.on('state_changed',
-            (snapshot) => {
-                // Progress, pause, and resume events
-                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                console.log('Upload is ' + progress + '% done');
-            },
-            (error) => {
-                // Handle unsuccessful uploads
-                return this.sendResponse({
-                    success: false,
-                    message: "An error occurred during file upload.",
-                    meta: { error: error.message }
-                });
-            },
-            () => {
-                // Handle successful uploads on complete
-                return this.sendResponse({
-                    success: true,
-                    message: "File uploaded successfully.",
-                    meta: { file: tempFilePath }
-                });
-            }
+          (snapshot) => {
+            // Progress, pause, and resume events
+            const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+            console.log('Upload is ' + progress + '% done');
+          },
+          (error) => {
+            // Handle unsuccessful uploads
+            reject(this.sendResponse({
+              success: false,
+              message: "An error occurred during file upload.",
+              meta: { error: error.message }
+            }));
+          },
+          () => {
+            // Handle successful uploads on complete
+            resolve(this.sendResponse({
+              success: true,
+              message: "File uploaded successfully.",
+              meta: { file: tempFilePath }
+            }));
+          }
         );
+      });
+  
+      return await uploadPromise;
+  
     } catch (error) {
-        return this.sendResponse({
-            success: false,
-            message: "An error occurred during file upload.",
-            meta: { error: error.message }
-        });
+      return this.sendResponse({
+        success: false,
+        message: "An error occurred during file upload.",
+        meta: { error: error.message }
+      });
     }
   };
+  
 
   public deleteFile = async (filePath: string): Promise<actionResponse> => {
     let hasDeletePermission = await this.permissionCheck("write", filePath);
