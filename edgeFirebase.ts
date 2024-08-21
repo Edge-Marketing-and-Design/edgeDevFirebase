@@ -55,7 +55,7 @@ import {
 } from "firebase/auth";
 
 
-import { getStorage, ref, uploadBytes, getDownloadURL, connectStorageEmulator, listAll, deleteObject} from "firebase/storage";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, connectStorageEmulator, listAll, deleteObject} from "firebase/storage";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
@@ -2080,53 +2080,77 @@ export const EdgeFirebase = class {
   // File functions
   public uploadFile = async (filePath: string, file: Blob, isPublic: boolean): Promise<actionResponse> => {
 
-      // Validate if file is provided
-      if (!file) {
+    // Validate if file is provided
+    if (!file) {
         return this.sendResponse({
-          success: false,
-          message: "No file provided for upload.",
-          meta: {}
+            success: false,
+            message: "No file provided for upload.",
+            meta: {}
         });
-      }
+    }
 
-      // Check if the user has write permission to the filePath
-      let hasWritePermission = await this.permissionCheck("write", filePath);
-      if (isPublic) {
+    // Check if the user has write permission to the filePath
+    let hasWritePermission = await this.permissionCheck("write", filePath);
+    if (isPublic) {
         hasWritePermission = true;
         filePath = "public";
-      }
-      if (!hasWritePermission) {
+    }
+    if (!hasWritePermission) {
         return this.sendResponse({
-          success: false,
-          message: "You do not have permission to upload files to this path.",
-          meta: {}
+            success: false,
+            message: "You do not have permission to upload files to this path.",
+            meta: {}
         });
-      }
+    }
 
-      try {
-        let randomId = ''
+    try {
+        let randomId = '';
         if (isPublic) {
-          randomId = Math.random().toString(36).substring(2, 6) + '-'
+            randomId = Math.random().toString(36).substring(2, 6) + '-';
         }
         const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + randomId + file.name;
-        const fileRef = ref(this.storage, tempFilePath);
-        if (isPublic) {
-          await uploadBytes(fileRef, file, { contentType: file.type, cacheControl: 'public, max-age=31536000' });
-        } else {
-         await uploadBytes(fileRef, file);
-        }
+        const storage = getStorage();
+        const fileRef = ref(storage, tempFilePath);
+
+        const metadata = {
+            contentType: file.type,
+            cacheControl: isPublic ? 'public, max-age=31536000' : undefined,
+        };
+
+        // Resumable upload
+        const uploadTask = uploadBytesResumable(fileRef, file, metadata);
+
+        // Monitor progress and handle completion
+        uploadTask.on('state_changed',
+            (snapshot) => {
+                // Progress, pause, and resume events
+                const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                console.log('Upload is ' + progress + '% done');
+            },
+            (error) => {
+                // Handle unsuccessful uploads
+                return this.sendResponse({
+                    success: false,
+                    message: "An error occurred during file upload.",
+                    meta: { error: error.message }
+                });
+            },
+            () => {
+                // Handle successful uploads on complete
+                return this.sendResponse({
+                    success: true,
+                    message: "File uploaded successfully.",
+                    meta: { file: tempFilePath }
+                });
+            }
+        );
+    } catch (error) {
         return this.sendResponse({
-          success: true,
-          message: "File uploaded successfully.",
-          meta: {file: tempFilePath}
+            success: false,
+            message: "An error occurred during file upload.",
+            meta: { error: error.message }
         });
-      } catch (error) {
-        return this.sendResponse({
-          success: false,
-          message: "An error occurred during file upload.",
-          meta: {}
-        });
-      }
+    }
   };
 
   public deleteFile = async (filePath: string): Promise<actionResponse> => {
