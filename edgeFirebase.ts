@@ -25,6 +25,7 @@ import {
   arrayRemove,
   arrayUnion,
   connectFirestoreEmulator,
+  getCountFromServer,
 } from "firebase/firestore";
 
 import {
@@ -60,6 +61,7 @@ import { getStorage, ref, uploadBytesResumable, getDownloadURL, connectStorageEm
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
 import { getAnalytics, logEvent } from "firebase/analytics";
+import { get } from "http";
 
 interface FirestoreQuery {
   field: string;
@@ -1285,9 +1287,19 @@ export const EdgeFirebase = class {
     return { data, next: nextLast };
   };
 
+  private getTotalCount = async (
+    collectionPath: string,
+    queryList: FirestoreQuery[] = []
+  ): Promise<number> => {
+    const q = this.getQuery(collectionPath, queryList);
+    const snapshot = await getCountFromServer(q);
+    return snapshot.data().count;
+  };
+
   get SearchStaticData() {
     const getStaticData = this.getStaticData;
     const permissionCheckOnly = this.permissionCheckOnly;
+    const getTotalCount = this.getTotalCount;
     const sendResponse = this.sendResponse;
     return class {
       private collectionPath = "";
@@ -1300,7 +1312,8 @@ export const EdgeFirebase = class {
         pagination: [],
         staticIsLastPage: true,
         staticIsFirstPage: true,
-        staticCurrentPage: ""
+        staticCurrentPage: "",
+        total: 0
       });
 
       public prev = async (): Promise<void> => {
@@ -1369,6 +1382,7 @@ export const EdgeFirebase = class {
         }
         this.results.data = results.data;
         this.results.staticCurrentPage = results.next.id;
+        this.results.total = await getTotalCount(this.collectionPath, this.queryList);
         if (!this.results.staticIsLastPage) {
           if (results.next) {
             const findItem = this.results.pagination.find(
