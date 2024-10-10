@@ -1291,6 +1291,9 @@ export const EdgeFirebase = class {
     collectionPath: string,
     queryList: FirestoreQuery[] = []
   ): Promise<number> => {
+    console.log('getTotalCount')
+    console.log(collectionPath )
+    console.log(queryList)
     const q = this.getQuery(collectionPath, queryList);
     const snapshot = await getCountFromServer(q);
     return snapshot.data().count;
@@ -1382,7 +1385,6 @@ export const EdgeFirebase = class {
         }
         this.results.data = results.data;
         this.results.staticCurrentPage = results.next.id;
-        this.results.total = await getTotalCount(this.collectionPath, this.queryList);
         if (!this.results.staticIsLastPage) {
           if (results.next) {
             const findItem = this.results.pagination.find(
@@ -1422,6 +1424,7 @@ export const EdgeFirebase = class {
             orderList,
             max
           );
+          this.results.total = await getTotalCount(this.collectionPath, this.queryList);
           if (Object.keys(results.data).length > 0) {
             this.results.staticIsLastPage = false;
             this.results.data = results.data;
