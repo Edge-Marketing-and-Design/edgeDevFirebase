@@ -1,5 +1,3 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
-/* eslint-disable no-undef */
 const functions = require('firebase-functions')
 const { PubSub } = require('@google-cloud/pubsub')
 const admin = require('firebase-admin')
@@ -22,18 +20,18 @@ const {
   FirestoreEvent,
 } = require('firebase-functions/v2/firestore')
 const { logger } = require('firebase-functions/v2')
-const { getFirestore } = require('firebase-admin/firestore')
+const { Firestore, getFirestore } = require('firebase-admin/firestore')
 const twilio = require('twilio')
 const db = getFirestore()
 
 // The permissionCheck function
 
 const permissions = {
-  'admin': {'assign': true, 'delete': true, 'read': true, 'write': true},
-  'editor': {'assign': false, 'delete': true, 'read': true, 'write': true},
-  'user': {'assign': false, 'delete': false, 'read': true, 'write': false},
-  'writer': {'assign': false, 'delete': false, 'read': true, 'write': true}
-};
+  admin: { assign: true, delete: true, read: true, write: true },
+  editor: { assign: false, delete: true, read: true, write: true },
+  user: { assign: false, delete: false, read: true, write: false },
+  writer: { assign: false, delete: false, read: true, write: true },
+}
 
 const permissionCheck = async (userId, action, originalFilePath) => {
   // Fetch user document
@@ -52,16 +50,17 @@ const permissionCheck = async (userId, action, originalFilePath) => {
     // Check if the role's collectionPath is a prefix of the collectionPath
     if (collectionPath.startsWith(role.collectionPath)) {
       // Use permissions object instead of fetching collection data
-      const rolePermissions = permissions[role.role];
+      const rolePermissions = permissions[role.role]
       if (rolePermissions && rolePermissions[action]) {
-        return true;
+        return true
       }
     }
   }
-  return false;
+  return false
 }
 
 module.exports = {
+  Firestore,
   pubsub,
   onMessagePublished,
   onRequest,
@@ -83,5 +82,3 @@ module.exports = {
   Storage,
   permissionCheck,
 }
-
-
