@@ -11,6 +11,7 @@ const { onMessagePublished } = require('firebase-functions/v2/pubsub')
 const { onCall, HttpsError, onRequest } = require('firebase-functions/v2/https')
 const { onSchedule } = require('firebase-functions/v2/scheduler')
 const { Storage } = require('@google-cloud/storage')
+const { onObjectFinalized, onObjectDeleted } = require('firebase-functions/v2/storage')
 const {
   onDocumentWritten,
   onDocumentCreated,
@@ -81,4 +82,6 @@ module.exports = {
   db,
   Storage,
   permissionCheck,
+  onObjectFinalized,
+  onObjectDeleted,
 }

@@ -74,3 +74,25 @@ if [ ! -f "$project_root/functions/package.json" ]; then
   npm install --no-audit --silent
   cd "$project_root"
 fi
+
+# Upgrade specific npm packages in the functions directory
+cd "$project_root/functions"
+
+# List of packages to upgrade
+npm install --save \
+    "@google-cloud/pubsub@^4.9.0" \
+    "aws-sdk@^2.1692.0" \
+    "crypto@^1.0.1" \
+    "dotenv@^16.3.1" \
+    "exceljs@^4.4.0" \
+    "firebase-admin@^13.0.2" \
+    "firebase-functions@^6.2.0" \
+    "form-data@^4.0.0" \
+    "formidable-serverless@^1.1.1" \
+    "moment-timezone@^0.5.43" \
+    "openai@^4.11.1" \
+    "stripe@^13.8.0" \
+    "twilio@^4.18.0"
+
+# Return to the project root
+cd "$project_root"

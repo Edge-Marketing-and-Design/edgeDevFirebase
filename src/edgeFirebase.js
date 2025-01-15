@@ -1,6 +1,5 @@
-/* eslint-disable @typescript-eslint/no-var-requires */
-/* eslint-disable no-undef */
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck } = require('./config.js')
+const AWS = require('aws-sdk')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
 
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
@@ -12,6 +11,153 @@ function formatPhoneNumber(phone) {
   // Return the formatted number
   return `+1${numericPhone}`
 }
+
+exports.uploadDocumentDeleted = onDocumentDeleted(
+  { document: 'organizations/{orgId}/files/{docId}', timeoutSeconds: 180 },
+  async (event) => {
+    const fileData = event.data.data()
+    const filePath = fileData.filePath
+    // Check if the file exists in the bucket
+    const bucket = admin.storage().bucket()
+    const [exists] = await bucket.file(filePath).exists()
+    if (exists) {
+      // Delete the file if it exists
+      await bucket.file(filePath).delete()
+      console.log(`File deleted: ${filePath}`)
+    }
+    else {
+      console.log(`File not found: ${filePath}`)
+    }
+  },
+)
+
+exports.addUpdateFileDoc = onCall(async (request) => {
+  const data = request.data
+  const auth = request.auth
+  let docId = data?.docId
+  if (data.uid === auth.uid) {
+    console.log(data)
+    const orgId = data.orgId
+    if (docId) {
+      const docRef = db.collection(`organizations/${orgId}/files`).doc(docId)
+      await docRef.set(data, { merge: true })
+    }
+    else {
+      const docRef = db.collection(`organizations/${orgId}/files`).doc()
+      await docRef.set(data)
+      docId = docRef.id
+    }
+  }
+  console.log(docId)
+  return { docId }
+})
+
+const deleteR2File = async (filePath) => {
+  const r2 = new AWS.S3({
+    endpoint: process.env.CLOUDFLARE_R2_ENDPOINT, // e.g., "https://<account-id>.r2.cloudflarestorage.com"
+    accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
+    secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+    region: 'auto', // Cloudflare R2 uses "auto" for region
+  })
+  const params = {
+    Bucket: 'files',
+    Key: filePath,
+  }
+  try {
+    await r2.deleteObject(params).promise()
+    console.log(`File deleted from Cloudflare R2: ${filePath}`)
+  }
+  catch (error) {
+    console.error('Error deleting file from Cloudflare R2:', error)
+  }
+}
+
+exports.fileDeleted = onObjectDeleted(async (event) => {
+  const docId = event.data.metadata?.fileDocId
+  const toR2 = event.data.metadata?.toR2
+  if (toR2) {
+    await deleteR2File(event.data.metadata?.r2FilePath)
+  }
+  if (docId) {
+    const orgId = event.data.metadata?.orgId
+    const docRef = db.collection(`organizations/${orgId}/files`).doc(docId)
+    const docSnapshot = await docRef.get()
+    if (docSnapshot.exists) {
+      console.log('Deleting file document:', docId)
+      await docRef.delete()
+    }
+    else {
+      console.log('File document not found:', docId)
+    }
+  }
+})
+
+exports.toR2 = onObjectFinalized(
+  {
+    bucket: process.env.FIREBASE_STORAGE_BUCKET,
+    region: process.env.FIREBASE_STORAGE_BUCKET_REGION,
+    memory: '2GiB',
+    cpu: 2,
+    timeoutSeconds: 540,
+  }, async (event) => {
+    const toR2 = event.data.metadata?.toR2
+    if (toR2) {
+      const r2 = new AWS.S3({
+        endpoint: process.env.CLOUDFLARE_R2_ENDPOINT, // e.g., "https://<account-id>.r2.cloudflarestorage.com"
+        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
+        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
+        region: 'auto', // Cloudflare R2 uses "auto" for region
+      })
+      const fileBucket = event.data.bucket // Storage bucket containing the file.
+      const filePath = event.data.name // File path in the bucket.
+      const r2FilePath = `${process.env.FIREBASE_STORAGE_BUCKET}/${event.data.metadata?.filePath}`
+      const r2URL = `${process.env.CLOUDFLARE_R2_PUBLIC_URL}/${r2FilePath}`
+      const fileName = event.data.metadata?.fileName // File name.
+      const contentType = event.data.contentType // File content type.
+
+      // Download file into memory from bucket.
+      const bucket = admin.storage().bucket(fileBucket)
+      const downloadResponse = await bucket.file(filePath).download()
+      const file = downloadResponse[0]
+
+      // Upload the file to Cloudflare R2.
+      const params = {
+        Bucket: 'files',
+        Key: r2FilePath,
+        Body: file,
+        ContentType: contentType,
+      }
+      try {
+        await r2.upload(params).promise()
+        const fileDocId = event.data.metadata?.fileDocId
+        const orgId = event.data.metadata?.orgId
+        const docRef = db.collection(`organizations/${orgId}/files`).doc(fileDocId)
+        await docRef.set({ r2FilePath, r2URL, uploadCompletedToR2: true }, { merge: true })
+        const fileRef = bucket.file(filePath)
+
+        const blankBuffer = Buffer.from('')
+        await fileRef.save(blankBuffer, {
+          contentType: 'application/octet-stream',
+        })
+
+        // Step 2: Update metadata with additional fields
+        const updatedMetadata = {
+          metadata: {
+            ...event.data.metadata,
+            r2FilePath,
+            r2URL,
+            uploadCompletedToR2: 'true', // Add custom metadata after file save
+          },
+        }
+
+        await fileRef.setMetadata(updatedMetadata)
+        console.log(`File uploaded to Cloudflare R2: ${fileName}`)
+      }
+      catch (error) {
+        console.error('Error uploading file to Cloudflare R2:', error)
+      }
+    }
+  })
 
 exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
   const queuedTopicsRef = db.collection('topic-queue')

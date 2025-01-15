@@ -56,12 +56,11 @@ import {
 } from "firebase/auth";
 
 
-import { getStorage, ref, uploadBytesResumable, getDownloadURL, connectStorageEmulator, listAll, deleteObject} from "firebase/storage";
+import { getStorage, ref, uploadBytesResumable, getDownloadURL, connectStorageEmulator, listAll, deleteObject, getMetadata} from "firebase/storage";
 
 import { getFunctions, httpsCallable, connectFunctionsEmulator } from "firebase/functions";
 
 import { getAnalytics, logEvent } from "firebase/analytics";
-import { get } from "http";
 
 interface FirestoreQuery {
   field: string;
@@ -205,7 +204,6 @@ interface User {
 interface Meta {
   [key: string]: unknown;
 }
-
 
 export const EdgeFirebase = class {
   constructor(
@@ -1235,6 +1233,7 @@ export const EdgeFirebase = class {
     registrationCode: "",
     registrationMeta: {},
     ruleHelpers: {},
+    currentUploadProgress: 0,
   });
 
   public getDocData = async (
@@ -2095,8 +2094,13 @@ export const EdgeFirebase = class {
 
 
   // File functions
-  public uploadFile = async (filePath: string, file: Blob, isPublic: boolean): Promise<actionResponse> => {
-
+  public uploadFile = async (orgId: string, file: Blob,  filePath: string = "", isPublic: boolean = false, toR2: boolean = false): Promise<actionResponse> => {
+   // Finish toCF function hook.
+    this.state.currentUploadProgress = 0;
+    let collectionPath = "organizations/" + orgId;
+    if (filePath) {
+      collectionPath = "organizations/" + orgId + "/" + filePath;
+    }
     // Validate if file is provided
     if (!file) {
       return this.sendResponse({
@@ -2107,10 +2111,11 @@ export const EdgeFirebase = class {
     }
   
     // Check if the user has write permission to the filePath
-    let hasWritePermission = await this.permissionCheck("write", filePath);
+    let hasWritePermission = await this.permissionCheck("write", collectionPath);
     if (isPublic) {
       hasWritePermission = true;
       filePath = "public";
+      collectionPath = "public";
     }
     if (!hasWritePermission) {
       return this.sendResponse({
@@ -2121,17 +2126,44 @@ export const EdgeFirebase = class {
     }
   
     try {
-      let randomId = '';
+      const fileDoc = {
+        orgId,
+        uploadCompleted: false,
+        uploadCompletedToR2: false,
+        fileName: file.name,
+        name: file.name,
+        fileSize: file.size,
+        fileType: file.type,
+        directory: filePath,
+        filePath: '',
+        r2filePath: '',
+        r2URL: '',
+        isPublic: isPublic,
+        toR2: toR2,
+      };
+
+      const result: any =  await this.runFunction("edgeFirebase-addUpdateFileDoc", fileDoc);
+      const fileDocId = (result.data as { docId: string }).docId;
+      let tempFilePath = `${collectionPath.replaceAll('/', '-')}` + '/' + fileDocId + '-' + file.name;
       if (isPublic) {
-        randomId = Math.random().toString(36).substring(2, 6) + '-';
+        tempFilePath = `${collectionPath.replaceAll('/', '-')}` + '/' + orgId + '-' + fileDocId + '-' + file.name;
       }
-      const tempFilePath = `${filePath.replaceAll('/', '-')}` + '/' + randomId + file.name;
+      await this.runFunction("edgeFirebase-addUpdateFileDoc", {orgId, docId: fileDocId, filePath: tempFilePath });
       const storage = getStorage();
       const fileRef = ref(storage, tempFilePath);
   
       const metadata = {
-        contentType: file.type,
         cacheControl: isPublic ? 'public, max-age=31536000' : undefined,
+        customMetadata: {
+          orgId,
+          uid: this.user.uid,
+          contentType: file.type,
+          fileName: file.name,
+          fileDocId: fileDocId,
+          filePath: tempFilePath,
+          toR2: toR2 ? 'true' : '',
+          isPublic: isPublic ? 'true' : ''
+        }
       };
   
       // Resumable upload
@@ -2143,14 +2175,14 @@ export const EdgeFirebase = class {
           (snapshot) => {
             // Progress, pause, and resume events
             const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-            console.log('Upload is ' + progress + '% done');
+            this.state.currentUploadProgress = progress;
           },
           (error) => {
             // Handle unsuccessful uploads
             reject(this.sendResponse({
               success: false,
               message: "An error occurred during file upload.",
-              meta: { error: error.message }
+              meta: { error: error.message, fileDocId}
             }));
           },
           () => {
@@ -2158,13 +2190,16 @@ export const EdgeFirebase = class {
             resolve(this.sendResponse({
               success: true,
               message: "File uploaded successfully.",
-              meta: { file: tempFilePath }
+              meta: { file: tempFilePath, fileDocId }
             }));
           }
         );
       });
-  
-      return await uploadPromise;
+     
+      
+      const uploadStatus = await uploadPromise;
+      await this.runFunction("edgeFirebase-addUpdateFileDoc", {orgId, docId: fileDocId, uploadStatus, uploadCompleted: true });
+      return uploadStatus;
   
     } catch (error) {
       return this.sendResponse({
@@ -2191,11 +2226,11 @@ export const EdgeFirebase = class {
     try {
       const fileRef = ref(this.storage, filePath);
       await deleteObject(fileRef);
-      return this.sendResponse({
-        success: true,
-        message: "File deleted successfully.",
-        meta: {}
-      });
+      this.sendResponse({
+              success: true,
+              message: "File deleted successfully.",
+              meta: {}
+            });
     } catch (error) {
       return this.sendResponse({
         success: false,
