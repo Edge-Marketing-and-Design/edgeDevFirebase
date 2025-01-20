@@ -2094,6 +2094,7 @@ export const EdgeFirebase = class {
 
 
   // File functions
+  // TODO... add object to pass merge with customMetadata as var....
   public uploadFile = async (orgId: string, file: Blob,  filePath: string = "", isPublic: boolean = false, toR2: boolean = false): Promise<actionResponse> => {
    // Finish toCF function hook.
     this.state.currentUploadProgress = 0;
@@ -2126,20 +2127,21 @@ export const EdgeFirebase = class {
     }
   
     try {
+
       const fileDoc = {
         orgId,
-        uploadCompleted: false,
+        contentType: file.type,
         uploadCompletedToR2: false,
         fileName: file.name,
         name: file.name,
         fileSize: file.size,
-        fileType: file.type,
         directory: filePath,
         filePath: '',
         r2filePath: '',
         r2URL: '',
         isPublic: isPublic,
         toR2: toR2,
+        uploadCompleted: false,
       };
 
       const result: any =  await this.runFunction("edgeFirebase-addUpdateFileDoc", fileDoc);
@@ -2159,10 +2161,15 @@ export const EdgeFirebase = class {
           uid: this.user.uid,
           contentType: file.type,
           fileName: file.name,
+          name: file.name,
+          fileSize: file.size,
+          directory: filePath,
           fileDocId: fileDocId,
           filePath: tempFilePath,
-          toR2: toR2 ? 'true' : '',
-          isPublic: isPublic ? 'true' : ''
+          r2filePath: '',
+          r2URL: '',
+          isPublic: isPublic ? 'true' : '',
+          toR2: toR2 ? 'true' : '', 
         }
       };
   
@@ -2255,10 +2262,13 @@ export const EdgeFirebase = class {
       const listResult = await listAll(listRef);
       const filesPromises = listResult.items.map(async (item) => {
         const downloadURL = await getDownloadURL(item);
+        const metadata = await getMetadata(item);
+        const fileName = metadata?.customMetadata?.name || item.name;
         return {
-          fileName: item.name,
+          fileName,
           fullPath: item.fullPath, // Assuming fullPath is a property available on the item
-          downloadURL: downloadURL
+          downloadURL: downloadURL,
+          metadata: metadata.customMetadata
         };
       });
       const files = await Promise.all(filesPromises);
