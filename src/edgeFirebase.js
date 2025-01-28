@@ -72,7 +72,7 @@ const deleteR2File = async (filePath) => {
   }
 }
 
-exports.fileDeleted = onObjectDeleted(async (event) => {
+exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUCKET_REGION }, async (event) => {
   const docId = event.data.metadata?.fileDocId
   const toR2 = event.data.metadata?.toR2
   if (toR2) {
