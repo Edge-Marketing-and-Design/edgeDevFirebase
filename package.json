@@ -1,6 +1,6 @@
 {
   "name": "@edgedev/firebase",
-  "version": "2.1.53",
+  "version": "2.1.54",
   "description": "Vue 3 / Nuxt 3 Plugin or Nuxt 3 plugin for firebase authentication and firestore.",
   "main": "index.ts",
   "scripts": {
