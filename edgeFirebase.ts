@@ -2142,6 +2142,7 @@ export const EdgeFirebase = class {
         isPublic: isPublic,
         toR2: toR2,
         uploadCompleted: false,
+        uploadTime: new Date().getTime(), 
       };
 
       const result: any =  await this.runFunction("edgeFirebase-addUpdateFileDoc", fileDoc);
@@ -2162,7 +2163,7 @@ export const EdgeFirebase = class {
           contentType: file.type,
           fileName: file.name,
           name: file.name,
-          fileSize: file.size,
+          fileSize: file.size.toString(),
           directory: filePath,
           fileDocId: fileDocId,
           filePath: tempFilePath,
