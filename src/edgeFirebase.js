@@ -75,8 +75,14 @@ const deleteR2File = async (filePath) => {
 exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUCKET_REGION }, async (event) => {
   const docId = event.data.metadata?.fileDocId
   const toR2 = event.data.metadata?.toR2
+  const r2ProcessCompleted = event.data.metadata?.r2ProcessCompleted
   if (toR2) {
-    await deleteR2File(event.data.metadata?.r2FilePath)
+    if (r2ProcessCompleted === 'true') {
+      await deleteR2File(event.data.metadata?.r2FilePath)
+    }
+    else {
+      return
+    }
   }
   if (docId) {
     const orgId = event.data.metadata?.orgId
@@ -127,14 +133,13 @@ exports.toR2 = onObjectFinalized(
         Body: file,
         ContentType: contentType,
       }
+      const fileRef = bucket.file(filePath)
       try {
         await r2.upload(params).promise()
         const fileDocId = event.data.metadata?.fileDocId
         const orgId = event.data.metadata?.orgId
         const docRef = db.collection(`organizations/${orgId}/files`).doc(fileDocId)
         await docRef.set({ r2FilePath, r2URL, uploadCompletedToR2: true }, { merge: true })
-        const fileRef = bucket.file(filePath)
-
         const blankBuffer = Buffer.from('')
         await fileRef.save(blankBuffer, {
           contentType: 'application/octet-stream',
@@ -147,6 +152,7 @@ exports.toR2 = onObjectFinalized(
             r2FilePath,
             r2URL,
             uploadCompletedToR2: 'true', // Add custom metadata after file save
+            r2ProcessCompleted: 'true',
           },
         }
 
@@ -154,6 +160,14 @@ exports.toR2 = onObjectFinalized(
         console.log(`File uploaded to Cloudflare R2: ${fileName}`)
       }
       catch (error) {
+        const updatedMetadata = {
+          metadata: {
+            ...event.data.metadata,
+            uploadCompletedToR2: 'false',
+            r2ProcessCompleted: 'true',
+          },
+        }
+        await fileRef.setMetadata(updatedMetadata)
         console.error('Error uploading file to Cloudflare R2:', error)
       }
     }
