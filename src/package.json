@@ -1,5 +1,6 @@
 {
     "name": "functions",
+    "type": "commonjs",
     "private": true,
     "description": "Cloud Functions for Firebase",
     "main": "index.js",
