@@ -123,14 +123,17 @@ exports.toR2 = onObjectFinalized(
 
       // Download file into memory from bucket.
       const bucket = admin.storage().bucket(fileBucket)
-      const downloadResponse = await bucket.file(filePath).download()
-      const file = downloadResponse[0]
+
+      const fileStream = bucket.file(filePath).createReadStream()
+
+      // const downloadResponse = await bucket.file(filePath).download()
+      // const file = downloadResponse[0]
 
       // Upload the file to Cloudflare R2.
       const params = {
         Bucket: 'files',
         Key: r2FilePath,
-        Body: file,
+        Body: fileStream,
         ContentType: contentType,
       }
       const fileRef = bucket.file(filePath)
@@ -140,6 +143,14 @@ exports.toR2 = onObjectFinalized(
         const orgId = event.data.metadata?.orgId
         const docRef = db.collection(`organizations/${orgId}/files`).doc(fileDocId)
         await docRef.set({ r2FilePath, r2URL, uploadCompletedToR2: true }, { merge: true })
+
+        // const base64Image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAgAB/ax3OTkAAAAASUVORK5CYII='
+        // const imageBuffer = Buffer.from(base64Image, 'base64')
+
+        // await fileRef.save(imageBuffer, {
+        //   contentType: 'image/png',
+        // })
+
         const blankBuffer = Buffer.from('')
         await fileRef.save(blankBuffer, {
           contentType: 'application/octet-stream',
