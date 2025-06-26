@@ -601,8 +601,17 @@ export const EdgeFirebase = class {
         }
       }
     }
-    const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
-    const userSnap = await getDoc(userRef);
+    let userSnap = null;
+    try {
+      const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
+      userSnap = await getDoc(userRef);
+    } catch (error) {
+      return this.sendResponse({
+        success: false,
+        message: "Registration code already used.",
+        meta: {}
+      });
+    }
     if (userSnap.exists()) {
       const user = userSnap.data();
       if (user.userId) {
