@@ -78,9 +78,13 @@ exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUC
   const docId = event.data.metadata?.fileDocId
   const toR2 = event.data.metadata?.toR2
   const cloudflareImageId = event.data.metadata?.cloudflareImageId
+  const cloudflareVideoId = event.data.metadata?.cloudflareVideoId
   const r2ProcessCompleted = event.data.metadata?.r2ProcessCompleted
   if (cloudflareImageId) {
     await deleteCloudflareImage(cloudflareImageId)
+  }
+  if (cloudflareVideoId) {
+    await deleteCloudflareVideo(cloudflareVideoId)
   }
   if (toR2) {
     if (r2ProcessCompleted === 'true') {
@@ -174,7 +178,7 @@ exports.toR2 = onObjectFinalized(
             r2ProcessCompleted: 'true',
           },
         }
-        if (contentType.startsWith('image/')) {
+        if (contentType.startsWith('image/') && process.env.CF_IMAGES_TOKEN) {
           try {
             const cloudflareImage = await uploadToCloudflareImage({
               r2FilePath,
@@ -184,7 +188,6 @@ exports.toR2 = onObjectFinalized(
               fileName,
               fileSize,
             })
-            console.log(cloudflareImage)
 
             updatedMetadata = {
               metadata: {
@@ -205,6 +208,37 @@ exports.toR2 = onObjectFinalized(
           }
         }
 
+        if (contentType.startsWith('video/') && process.env.CF_IMAGES_TOKEN) {
+          try {
+            const cloudflareVideo = await uploadToCloudflareVideo({
+              r2FilePath,
+              r2URL,
+              fileDocId,
+              orgId,
+              fileName,
+              fileSize,
+            })
+            console.log(cloudflareVideo)
+            updatedMetadata = {
+              metadata: {
+                ...event.data.metadata,
+                r2FilePath,
+                r2URL,
+                uploadCompletedToR2: 'true', // Add custom metadata after file save
+                r2ProcessCompleted: 'true',
+                cloudflareVideoId: cloudflareVideo.id,
+                cloudflareVideoPlayback: cloudflareVideo.playback,
+                cloudflareVideoThumbnail: cloudflareVideo.thumbnail,
+                cloudflareVideoPreview: cloudflareVideo.preview,
+                cloudflareUploadCompleted: true,
+              },
+            }
+            await docRef.set({ cloudflareVideoId: cloudflareVideo.id, cloudflareVideoPlayback: cloudflareVideo.playback, cloudflareVideoThumbnail: cloudflareVideo.thumbnail, cloudflareVideoPreview: cloudflareVideo.preview, cloudflareUploadCompleted: true }, { merge: true })
+          }
+          catch (e) {
+            console.error('Cloudflare Video Upload Failed', e)
+          }
+        }
         await fileRef.setMetadata(updatedMetadata)
         console.log(`File uploaded to Cloudflare R2: ${fileName}`)
       }
@@ -695,6 +729,82 @@ async function deleteCloudflareImage(imageId) {
 
   if (!response.ok) {
     throw new Error(`Failed to delete Cloudflare image: ${response.statusText}`)
+  }
+
+  return true
+}
+
+async function uploadToCloudflareVideo({ r2FilePath, r2URL, fileDocId, orgId, fileSize }) {
+  const API_TOKEN = process.env.CF_IMAGES_TOKEN
+  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
+
+  const cleanedr2FilePath = r2FilePath
+    .replaceAll('/', '-')
+    .replace('.firebasestorage.app-organizations', '')
+
+  const metadata = {
+    orgId,
+    fileDocId,
+    fileName: cleanedr2FilePath,
+    fileSize,
+  }
+
+  const body = {
+    url: r2URL,
+    meta: {
+      name: cleanedr2FilePath,
+      ...metadata,
+    },
+    allowDownloads: true,
+  }
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stream/copy`,
+    {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${API_TOKEN}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    },
+  )
+
+  const result = await response.json()
+
+  if (!result.success) {
+    const errorMessages = (result.errors || [])
+      .map(error => error.message || 'Unknown error')
+      .join('; ')
+    throw new Error(`Cloudflare Stream upload failed: ${errorMessages}`)
+  }
+  console.log(result.result)
+  const { uid, preview, playback, thumbnail } = result.result
+
+  return {
+    id: uid,
+    preview,
+    playback,
+    thumbnail,
+  }
+}
+
+async function deleteCloudflareVideo(videoId) {
+  const API_TOKEN = process.env.CF_IMAGES_TOKEN
+  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stream/${videoId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete Cloudflare video: ${response.statusText}`)
   }
 
   return true
