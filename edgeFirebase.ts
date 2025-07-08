@@ -2104,7 +2104,7 @@ export const EdgeFirebase = class {
 
   // File functions
   // TODO... add object to pass merge with customMetadata as var....
-  public uploadFile = async (orgId: string, file: Blob,  filePath: string = "", isPublic: boolean = false, toR2: boolean = false): Promise<actionResponse> => {
+  public uploadFile = async (orgId: string, file: Blob,  filePath: string = "", isPublic: boolean = false, toR2: boolean = false, extraMeta: object = null): Promise<actionResponse> => {
    // Finish toCF function hook.
     this.state.currentUploadProgress = 0;
     let collectionPath = "organizations/" + orgId;
@@ -2215,7 +2215,7 @@ export const EdgeFirebase = class {
      
       
       const uploadStatus = await uploadPromise;
-      await this.runFunction("edgeFirebase-addUpdateFileDoc", {orgId, docId: fileDocId, uploadStatus, uploadCompleted: true });
+      await this.runFunction("edgeFirebase-addUpdateFileDoc", {orgId, docId: fileDocId, uploadStatus, uploadCompleted: true, meta: extraMeta });
       return uploadStatus;
   
     } catch (error) {

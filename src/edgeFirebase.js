@@ -1,6 +1,8 @@
 const AWS = require('aws-sdk')
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const FormData = require('form-data')
+const fetch = require('node-fetch')
 
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
 const systemNumber = process.env.TWILIO_SYSTEM_NUMBER
@@ -75,7 +77,11 @@ const deleteR2File = async (filePath) => {
 exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUCKET_REGION }, async (event) => {
   const docId = event.data.metadata?.fileDocId
   const toR2 = event.data.metadata?.toR2
+  const cloudflareImageId = event.data.metadata?.cloudflareImageId
   const r2ProcessCompleted = event.data.metadata?.r2ProcessCompleted
+  if (cloudflareImageId) {
+    await deleteCloudflareImage(cloudflareImageId)
+  }
   if (toR2) {
     if (r2ProcessCompleted === 'true') {
       await deleteR2File(event.data.metadata?.r2FilePath)
@@ -119,6 +125,7 @@ exports.toR2 = onObjectFinalized(
       const r2FilePath = `${process.env.FIREBASE_STORAGE_BUCKET}/${event.data.metadata?.filePath}`
       const r2URL = `${process.env.CLOUDFLARE_R2_PUBLIC_URL}/${r2FilePath}`
       const fileName = event.data.metadata?.fileName // File name.
+      const fileSize = event.data.metadata?.fileSize
       const contentType = event.data.contentType // File content type.
 
       // Download file into memory from bucket.
@@ -139,6 +146,7 @@ exports.toR2 = onObjectFinalized(
       const fileRef = bucket.file(filePath)
       try {
         await r2.upload(params).promise()
+
         const fileDocId = event.data.metadata?.fileDocId
         const orgId = event.data.metadata?.orgId
         const docRef = db.collection(`organizations/${orgId}/files`).doc(fileDocId)
@@ -157,7 +165,7 @@ exports.toR2 = onObjectFinalized(
         })
 
         // Step 2: Update metadata with additional fields
-        const updatedMetadata = {
+        let updatedMetadata = {
           metadata: {
             ...event.data.metadata,
             r2FilePath,
@@ -165,6 +173,36 @@ exports.toR2 = onObjectFinalized(
             uploadCompletedToR2: 'true', // Add custom metadata after file save
             r2ProcessCompleted: 'true',
           },
+        }
+        if (contentType.startsWith('image/')) {
+          try {
+            const cloudflareImage = await uploadToCloudflareImage({
+              r2FilePath,
+              r2URL,
+              fileDocId,
+              orgId,
+              fileName,
+              fileSize,
+            })
+            console.log(cloudflareImage)
+
+            updatedMetadata = {
+              metadata: {
+                ...event.data.metadata,
+                r2FilePath,
+                r2URL,
+                uploadCompletedToR2: 'true', // Add custom metadata after file save
+                r2ProcessCompleted: 'true',
+                cloudflareImageId: cloudflareImage.id,
+                cloudflareImageVariants: cloudflareImage.variants,
+                cloudflareUploadCompleted: true,
+              },
+            }
+            await docRef.set({ cloudflareImageId: cloudflareImage.id, cloudflareImageVariants: cloudflareImage.variants, cloudflareUploadCompleted: true }, { merge: true })
+          }
+          catch (e) {
+            console.error('Cloudflare Image Upload Failed', e)
+          }
         }
 
         await fileRef.setMetadata(updatedMetadata)
@@ -592,4 +630,72 @@ function markProcessed(eventRef) {
   return eventRef.set({ processed: true }).then(() => {
     return null
   })
+}
+
+async function uploadToCloudflareImage({ r2FilePath, r2URL, fileDocId, orgId, fileName, fileSize }) {
+  const cleanedr2FilePath = r2FilePath.replaceAll('/', '-').replace('.firebasestorage.app-organizations', '')
+  const metadata = {
+    orgId,
+    fileDocId,
+    fileName: cleanedr2FilePath,
+    fileSize,
+  }
+
+  const API_TOKEN = process.env.CF_IMAGES_TOKEN
+  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
+
+  const formData = new FormData()
+  formData.append('url', r2URL)
+  formData.append('metadata', JSON.stringify(metadata))
+  formData.append('id', cleanedr2FilePath)
+
+  const response = await fetch(
+  `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/images/v1`,
+  {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${API_TOKEN}`,
+      ...formData.getHeaders(),
+    },
+    body: formData,
+  },
+  )
+
+  const result = await response.json()
+
+  const { result: imageData, success, errors } = result
+
+  if (!success) {
+    const errorMessages = (errors || [])
+      .map(error => (error.message ? error.message : 'Unknown error'))
+      .join('; ')
+    throw new Error(`Cloudflare upload failed: ${errorMessages}`)
+  }
+
+  return {
+    id: imageData.id,
+    variants: imageData.variants,
+    meta: imageData.meta || {},
+  }
+}
+
+async function deleteCloudflareImage(imageId) {
+  const API_TOKEN = process.env.CF_IMAGES_TOKEN
+  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
+
+  const response = await fetch(
+    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/images/v1/${imageId}`,
+    {
+      method: 'DELETE',
+      headers: {
+        Authorization: `Bearer ${API_TOKEN}`,
+      },
+    },
+  )
+
+  if (!response.ok) {
+    throw new Error(`Failed to delete Cloudflare image: ${response.statusText}`)
+  }
+
+  return true
 }
