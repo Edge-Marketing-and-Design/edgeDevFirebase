@@ -606,9 +606,34 @@ export const EdgeFirebase = class {
       const userRef = doc(this.db, "staged-users", userRegister.registrationCode);
       userSnap = await getDoc(userRef);
     } catch (error) {
+      let errorMessage = error.message
+
+      switch (error.code) {
+        case 'permission-denied':
+          errorMessage = "This registration code is no longer valid or has already been used."
+          break
+        case 'unavailable':
+          errorMessage = "Your device or browser could not connect to the registration service. Please check your internet connection or try again using a different browser."
+          break
+        case 'not-found':
+          errorMessage = "This registration code does not exist. Please check for typos or contact support."
+          break
+        case 'deadline-exceeded':
+          errorMessage = "The request timed out. Please try again in a moment, or check your connection."
+          break
+        case 'internal':
+          errorMessage = "Something went wrong in your browser that prevented the registration from completing. Try refreshing or switching browsers."
+          break
+        case 'resource-exhausted':
+          errorMessage = "Too many requests from this device. Please wait a few minutes and try again."
+          break
+        case 'failed-precondition':
+          errorMessage = "Your browser is not supported or is blocking key features required for registration. Try updating or switching browsers."
+          break
+      }
       return this.sendResponse({
         success: false,
-        message: "Registration code already used.",
+        message: errorMessage,
         meta: {}
       });
     }
