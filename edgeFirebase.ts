@@ -370,8 +370,15 @@ export const EdgeFirebase = class {
     // Took this out because if another client is logged in, it breaks the other client
     // await this.ruleHelperReset();
     await this.initUserMetaPermissions(docSnap);
+    if (this.user.roles.length > 0 || this.user.specialPermissions.length > 0) {
     this.user.loggedIn = true;
     this.user.loggingIn = false;
+    } else {
+      this.user.loggedIn = false;
+      this.user.loggingIn = false;
+      this.user.logInError = true;
+      this.user.logInErrorMessage = "You do not have permission to access this application. Please contact your administrator.";
+    }
   };
 
   private waitForUser = async(): Promise<void> => {
