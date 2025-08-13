@@ -1735,6 +1735,7 @@ export const EdgeFirebase = class {
                 docId,
                 meta: user.meta,
                 userId: user.userId,
+                uid: user.uid,
               }
               items[doc.id] = item;
             });
