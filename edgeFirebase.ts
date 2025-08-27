@@ -853,13 +853,11 @@ export const EdgeFirebase = class {
 
 
 
-  public setUserMeta = async (meta: Meta, userId = ''): Promise<actionResponse> => {
-    let stagedDocId = this.user.stagedDocId;
+  public setUserMeta = async (meta: Meta, userId = '', stagedDocId = ''): Promise<actionResponse> => {
     if (userId) {
       const users = Object.values(this.state.users)  as User[];
       const user = users.find((u) => u.userId === userId);
       if (user) {
-        console.log(user)
         stagedDocId = user.docId;
       } else {
         return this.sendResponse({
@@ -868,6 +866,20 @@ export const EdgeFirebase = class {
           meta: {}
         });
       }
+    }
+    if (!userId && stagedDocId) {
+      const users = Object.values(this.state.users)  as User[];
+      const user = users.find((u) => u.docId === stagedDocId);
+      if (!user) {
+        return this.sendResponse({
+          success: false,
+          message: "You don't have access to change this user.",
+          meta: {}
+        });
+      }
+    }
+    if (!stagedDocId) {
+      stagedDocId = this.user.stagedDocId;
     }
     for (const [key, value] of Object.entries(meta)) {
       await updateDoc(doc(this.db, "staged-users/" + stagedDocId), {
