@@ -125,6 +125,7 @@ interface newUser {
   specialPermissions: specialPermission[];
   meta: object;
   isTemplate?: boolean;
+  customRegCode?: string;
   subCreate?: {
     rootPath: string, // This must be a collection path (odd number of segments) since a document will be created and assigned to ther user here.
     role: string,
@@ -1205,8 +1206,10 @@ export const EdgeFirebase = class {
   private generateUserMeta = async (userMeta: newUser): Promise<actionResponse> => {
     const roles: role[] = userMeta.roles || [];
     const specialPermissions: specialPermission[] = userMeta.specialPermissions || [];
+    const docId = userMeta?.customRegCode || "";
     delete userMeta.roles;
     delete userMeta.specialPermissions;
+    delete userMeta.customRegCode;
 
     let isTemplate = false
     if (Object.prototype.hasOwnProperty.call(userMeta, "isTemplate") && userMeta.isTemplate) {
@@ -1235,8 +1238,13 @@ export const EdgeFirebase = class {
     }
 
     const onlyMeta = { meta: userMeta.meta, userId:  "", uid: this.user.uid, roles:{}, specialPermissions:{}, isTemplate, subCreate, templateUserId: "" };
-
-    const docRef =  await addDoc(collection(this.db, "staged-users"), onlyMeta );
+    let docRef; 
+    if (!docId) {
+      docRef =  await addDoc(collection(this.db, "staged-users"), onlyMeta );
+    } else {
+      docRef =  doc(this.db, "staged-users", docId);
+      await setDoc(docRef, onlyMeta);
+    }
     for (const role of roles) {
       await this.storeUserRoles(docRef.id, role.collectionPath, role.role);
     }
