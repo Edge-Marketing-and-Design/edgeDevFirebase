@@ -2,7 +2,7 @@ const AWS = require('aws-sdk')
 const FormData = require('form-data')
 const fetch = require('node-fetch')
 
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
 const systemNumber = process.env.TWILIO_SYSTEM_NUMBER
@@ -299,6 +299,35 @@ exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 1
         }
       }
     })
+  }
+})
+
+exports.userSyncMetaToOrg = onDocumentWritten({ document: 'staged-users/{stagedId}', timeoutSeconds: 180 }, async (event) => {
+  console.log('userSyncMetaToOrg triggered')
+  const change = event.data
+  const afterExists = change.after.exists
+  const beforeData = change.before.data() || {}
+  const afterData = afterExists ? change.after.data() : null
+
+  const beforeUniqueOrgs = beforeData.roles ? [...new Set(Object.values(beforeData.roles).map(role => role.collectionPath.split('-')[1]))] : []
+  const afterUniqueOrgs = (afterData && afterData.roles) ? [...new Set(Object.values(afterData.roles).map(role => role.collectionPath.split('-')[1]))] : []
+  if (!afterExists) {
+    for (const orgId of beforeUniqueOrgs) {
+      // delete user from org
+      const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
+      await orgRef.delete()
+    }
+  }
+  const orgsRemoved = beforeUniqueOrgs.filter(orgId => !afterUniqueOrgs.includes(orgId))
+  for (const orgId of orgsRemoved) {
+    // delete user from org
+    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
+    await orgRef.delete()
+  }
+  for (const orgId of afterUniqueOrgs) {
+    // add user to org
+    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
+    await orgRef.set(afterData.meta)
   }
 })
 

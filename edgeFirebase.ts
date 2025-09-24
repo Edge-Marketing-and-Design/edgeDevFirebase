@@ -728,27 +728,59 @@ export const EdgeFirebase = class {
           });
         }
         
-        let metaUpdate = {};
-        if (Object.prototype.hasOwnProperty.call(userRegister, 'meta')) {
-          metaUpdate = userRegister.meta;
-        }else{
-          metaUpdate = user.meta;
-        }
-        let stagedUserUpdate: {userId?: string, templateUserId?: string, dynamicDocumentFieldValue?: string, uid: string, meta: unknown, templateMeta?: unknown, requestedOrgId?: unknown} = {userId: response.user.uid, uid: response.user.uid, meta: metaUpdate}
+        // Build Firestore dotted-path updates so meta merges instead of replacing
+        const incomingMeta =
+          (Object.prototype.hasOwnProperty.call(userRegister, 'meta') &&
+          userRegister.meta && typeof userRegister.meta === 'object')
+            ? (userRegister.meta as any)
+            : {};
+
+        // Identity fields written at top level
+        let stagedUserUpdate: {
+          userId?: string;
+          templateUserId?: string;
+          dynamicDocumentFieldValue?: string;
+          uid: string;
+          requestedOrgId?: string;
+        } = {
+          userId: response.user.uid,
+          uid: response.user.uid
+        };
+
+        let dottedUpdates: Record<string, any> = {};
+
         if (user.isTemplate) {
-          stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, meta: user.meta, templateMeta: metaUpdate}
+          // Template flow: keep template `meta` intact; write user fields as templateMeta.*
+          stagedUserUpdate = { templateUserId: response.user.uid, uid: response.user.uid };
+
           if (Object.prototype.hasOwnProperty.call(userRegister, 'dynamicDocumentFieldValue')) {
-            stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate}
+            stagedUserUpdate.dynamicDocumentFieldValue = userRegister.dynamicDocumentFieldValue;
           }
           if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
-            stagedUserUpdate = {templateUserId: response.user.uid, uid: response.user.uid, dynamicDocumentFieldValue: userRegister.dynamicDocumentFieldValue, meta: user.meta, templateMeta: metaUpdate, requestedOrgId: userRegister.requestedOrgId.toLowerCase()}
+            stagedUserUpdate.requestedOrgId = userRegister.requestedOrgId?.toLowerCase();
           }
+
+          // Only write templateMeta.* dotted paths (do not touch meta)
+          dottedUpdates = { ...this.flattenObjectPaths(incomingMeta, 'templateMeta') };
+        } else {
+          // Non-template: merge user meta into existing meta using dotted paths
+          if (Object.prototype.hasOwnProperty.call(userRegister, 'requestedOrgId')) {
+            stagedUserUpdate.requestedOrgId = userRegister.requestedOrgId?.toLowerCase();
+          }
+          dottedUpdates = { ...this.flattenObjectPaths(incomingMeta, 'meta') };
         }
-        const initRoleHelper = {uid: response.user.uid}
-        initRoleHelper["edge-assignment-helper"] = {permissionType: "roles"}
+
+        const initRoleHelper: any = { uid: response.user.uid };
+        initRoleHelper["edge-assignment-helper"] = { permissionType: "roles" };
         this.user.loggingIn = true;
         await setDoc(doc(this.db, "rule-helpers", response.user.uid), initRoleHelper);
-        await updateDoc(doc(this.db, "staged-users/" + userRegister.registrationCode), stagedUserUpdate)
+
+        // Firestore merges only the specified dotted fields inside meta/templateMeta.
+        await updateDoc(
+          doc(this.db, "staged-users/" + userRegister.registrationCode),
+          { ...stagedUserUpdate, ...dottedUpdates }
+        );
+
         this.logAnalyticsEvent("sign_up", { uid: response.user.uid});
         return this.sendResponse({
           success: true,
@@ -1022,6 +1054,29 @@ export const EdgeFirebase = class {
     console.log(response);
     return response;
   };
+
+  private flattenObjectPaths = (obj: any, base: string): Record<string, any> => {
+    const out: Record<string, any> = {};
+    const walk = (cur: any, prefix: string) => {
+      if (cur === null || cur === undefined) {
+        out[prefix] = cur;
+        return;
+      }
+      if (typeof cur !== 'object' || Array.isArray(cur)) {
+        out[prefix] = cur;
+        return;
+      }
+      for (const [k, v] of Object.entries(cur)) {
+        walk(v, `${prefix}.${k}`);
+      }
+    };
+    if (obj && typeof obj === 'object') {
+      for (const [k, v] of Object.entries(obj)) {
+        walk(v, `${base}.${k}`);
+      }
+    }
+    return out;
+  }
 
   private setRuleHelper = async(collectionPath: string, action): Promise<void> => {
     const collection = collectionPath.replaceAll("-", "/").split("/");
