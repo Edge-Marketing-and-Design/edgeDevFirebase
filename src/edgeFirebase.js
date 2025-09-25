@@ -327,7 +327,7 @@ exports.userSyncMetaToOrg = onDocumentWritten({ document: 'staged-users/{stagedI
   for (const orgId of afterUniqueOrgs) {
     // add user to org
     const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
-    await orgRef.set(afterData.meta)
+    await orgRef.set({ ...afterData.meta, userId: afterData.userId, stagedDocId: change.before.id })
   }
 })
 

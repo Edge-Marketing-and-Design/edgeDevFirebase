@@ -914,11 +914,11 @@ export const EdgeFirebase = class {
     if (!stagedDocId) {
       stagedDocId = this.user.stagedDocId;
     }
+    const updates: Record<string, unknown> = { uid: this.user.uid };
     for (const [key, value] of Object.entries(meta)) {
-      await updateDoc(doc(this.db, "staged-users/" + stagedDocId), {
-        ["meta." + key]: value, uid: this.user.uid
-      });
+      updates[`meta.${key}`] = value;
     }
+    await updateDoc(doc(this.db, "staged-users/" + stagedDocId), updates);
     return this.sendResponse({
       success: true,
       message: "line 664",
