@@ -1389,8 +1389,13 @@ export const EdgeFirebase = class {
     const canRead = await this.permissionCheck("read", collectionPath);
     if (canRead) {
       const q = this.getQuery(collectionPath, queryList, orderList, max, last);
-
-      const docs = await getDocs(q);
+      let docs;
+      try {
+        docs = await getDocs(q);
+      } catch (error) {
+        console.log('error getting documents')
+        console.error('Error getting documents:', error);
+      }
 
       nextLast = docs.docs[docs.docs.length - 1];
       docs.forEach((doc) => {
