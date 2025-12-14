@@ -20,10 +20,15 @@ const {
   Change,
   FirestoreEvent,
 } = require('firebase-functions/v2/firestore')
-const { logger } = require('firebase-functions/v2')
+const { logger, setGlobalOptions } = require('firebase-functions/v2')
 const { Firestore, getFirestore } = require('firebase-admin/firestore')
 const twilio = require('twilio')
 const db = getFirestore()
+
+const defaultRegion = process.env.FIREBASE_STORE_REGION
+  || 'us-west1'
+
+setGlobalOptions({ region: defaultRegion })
 
 // The permissionCheck function
 
