@@ -223,6 +223,7 @@ export const EdgeFirebase = class {
     },
     isPersistant: false,
     enablePopupRedirect: false,
+    functionsRegion = "us-central1",
   ) {
     this.firebaseConfig = firebaseConfig;
     this.app = initializeApp(this.firebaseConfig);
@@ -251,7 +252,7 @@ export const EdgeFirebase = class {
      if (this.firebaseConfig.storageBucket) {
       this.storage = getStorage(this.app);
     }
-    this.functions = getFunctions(this.app);
+    this.functions = getFunctions(this.app, functionsRegion);
     if (this.firebaseConfig.emulatorFunctions) {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
