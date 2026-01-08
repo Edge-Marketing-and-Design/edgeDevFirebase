@@ -184,6 +184,7 @@ interface firebaseConfig {
   emulatorFirestore?: string;
   emulatorFunctions?: string;
   emulatorStorage?: string;
+  functionsRegion?: string;
 }
 
 interface actionResponse {
@@ -206,10 +207,12 @@ interface Meta {
   [key: string]: unknown;
 }
 
+const DEFAULT_FUNCTIONS_REGION = "us-central1";
+
 export const EdgeFirebase = class {
   constructor(
     firebaseConfig: firebaseConfig = {
-      apiKey: "",
+     apiKey: "",
       authDomain: "",
       projectId: "",
       storageBucket: "",
@@ -220,10 +223,10 @@ export const EdgeFirebase = class {
       emulatorFirestore: "",
       emulatorFunctions: "",
       emulatorStorage: "",
+      functionsRegion: ""
     },
     isPersistant: false,
     enablePopupRedirect: false,
-    functionsRegion = "us-central1",
   ) {
     this.firebaseConfig = firebaseConfig;
     this.app = initializeApp(this.firebaseConfig);
@@ -252,7 +255,12 @@ export const EdgeFirebase = class {
      if (this.firebaseConfig.storageBucket) {
       this.storage = getStorage(this.app);
     }
+   
+    const functionsRegion =
+      this.firebaseConfig.functionsRegion || DEFAULT_FUNCTIONS_REGION;
+
     this.functions = getFunctions(this.app, functionsRegion);
+    
     if (this.firebaseConfig.emulatorFunctions) {
       connectFunctionsEmulator(this.functions, "127.0.0.1", this.firebaseConfig.emulatorFunctions)
     }
@@ -2127,6 +2135,14 @@ export const EdgeFirebase = class {
       cloneItem.doc_created_at = currentTime;
     }
     if (Object.prototype.hasOwnProperty.call(cloneItem, "docId")) {
+      const canWriteCollection = await this.permissionCheck("write", collectionPath);
+      if (!canWriteCollection) {
+        return this.sendResponse({
+          success: false,
+          message: `You do not have permission to write to "${collectionPath}"`,
+          meta: {}
+        });
+      }
       const canWrite = await this.permissionCheck("write", collectionPath + "/" + cloneItem.docId);
       if (!canWrite) {
         return this.sendResponse({
