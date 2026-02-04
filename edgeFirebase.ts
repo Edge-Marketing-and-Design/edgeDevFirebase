@@ -923,9 +923,51 @@ export const EdgeFirebase = class {
     if (!stagedDocId) {
       stagedDocId = this.user.stagedDocId;
     }
+    const stagedUsers = this.state.users as Record<string, any>;
+    const existingMeta =
+      stagedDocId && stagedUsers[stagedDocId] && typeof stagedUsers[stagedDocId].meta === "object"
+        ? stagedUsers[stagedDocId].meta as Record<string, unknown>
+        : null;
+
+    const valuesEqual = (a: any, b: any): boolean => {
+      if (Object.is(a, b)) return true;
+      if (a === null || b === null) return false;
+      if (typeof a !== "object" || typeof b !== "object") return false;
+      const aIsArray = Array.isArray(a);
+      const bIsArray = Array.isArray(b);
+      if (aIsArray !== bIsArray) return false;
+      if (aIsArray) {
+        if (a.length !== b.length) return false;
+        for (let i = 0; i < a.length; i++) {
+          if (!valuesEqual(a[i], b[i])) return false;
+        }
+        return true;
+      }
+      const aKeys = Object.keys(a);
+      const bKeys = Object.keys(b);
+      if (aKeys.length !== bKeys.length) return false;
+      for (const key of aKeys) {
+        if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+        if (!valuesEqual(a[key], b[key])) return false;
+      }
+      return true;
+    };
+
     const updates: Record<string, unknown> = { uid: this.user.uid };
+    let changedKeys = 0;
     for (const [key, value] of Object.entries(meta)) {
+      if (existingMeta && valuesEqual(existingMeta[key], value)) {
+        continue;
+      }
       updates[`meta.${key}`] = value;
+      changedKeys++;
+    }
+    if (changedKeys === 0) {
+      return this.sendResponse({
+        success: true,
+        message: "line 664",
+        meta: {}
+      });
     }
     await updateDoc(doc(this.db, "staged-users/" + stagedDocId), updates);
     return this.sendResponse({
