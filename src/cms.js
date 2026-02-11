@@ -1839,12 +1839,18 @@ const buildBlockAiPrompt = ({
   ].join('\n')
 }
 
+const assertCallableUser = (request) => {
+  if (!request?.auth?.uid)
+    throw new HttpsError('unauthenticated', 'Authentication required.')
+  if (request?.data?.uid !== request.auth.uid)
+    throw new HttpsError('permission-denied', 'UID mismatch.')
+}
+
 exports.updateSeoFromAi = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
   const data = request.data || {}
   const auth = request.auth
-  const { orgId, siteId, pageId, uid } = data
-  if (!auth?.uid || auth.uid !== uid)
-    throw new HttpsError('permission-denied', 'Unauthorized')
+  const { orgId, siteId, pageId } = data
   if (!orgId || !siteId || !pageId)
     throw new HttpsError('invalid-argument', 'Missing orgId, siteId, or pageId')
   const allowed = await permissionCheck(auth.uid, 'write', `organizations/${orgId}/sites/${siteId}/pages`)
@@ -1910,9 +1916,7 @@ exports.updateSeoFromAi = onCall({ timeoutSeconds: 180 }, async (request) => {
 })
 
 exports.getCloudflarePagesProject = onCall(async (request) => {
-  if (!request?.auth) {
-    throw new HttpsError('unauthenticated', 'Authentication required.')
-  }
+  assertCallableUser(request)
 
   if (!CLOUDFLARE_PAGES_PROJECT) {
     logger.warn('CLOUDFLARE_PAGES_PROJECT is not set.')
@@ -1923,12 +1927,10 @@ exports.getCloudflarePagesProject = onCall(async (request) => {
 })
 
 exports.generateBlockFields = onCall({ timeoutSeconds: 180 }, async (request) => {
+  assertCallableUser(request)
   const data = request.data || {}
   const auth = request.auth
-  const { orgId, uid, blockId, blockName, content, fields, currentValues, meta, instructions } = data
-
-  if (!auth?.uid || auth.uid !== uid)
-    throw new HttpsError('permission-denied', 'Unauthorized')
+  const { orgId, blockId, blockName, content, fields, currentValues, meta, instructions } = data
   if (!orgId || !blockId)
     throw new HttpsError('invalid-argument', 'Missing orgId or blockId')
   if (!Array.isArray(fields) || fields.length === 0)

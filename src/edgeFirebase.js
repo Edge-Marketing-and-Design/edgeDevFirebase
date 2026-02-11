@@ -14,6 +14,13 @@ function formatPhoneNumber(phone) {
   return `+1${numericPhone}`
 }
 
+const assertCallableUser = (request) => {
+  if (!request?.auth?.uid)
+    throw new HttpsError('unauthenticated', 'Authentication required.')
+  if (request?.data?.uid !== request.auth.uid)
+    throw new HttpsError('permission-denied', 'UID mismatch.')
+}
+
 exports.uploadDocumentDeleted = onDocumentDeleted(
   { document: 'organizations/{orgId}/files/{docId}', timeoutSeconds: 180 },
   async (event) => {
@@ -34,21 +41,19 @@ exports.uploadDocumentDeleted = onDocumentDeleted(
 )
 
 exports.addUpdateFileDoc = onCall(async (request) => {
+  assertCallableUser(request)
   const data = request.data
-  const auth = request.auth
   let docId = data?.docId
-  if (data.uid === auth.uid) {
-    console.log(data)
-    const orgId = data.orgId
-    if (docId) {
-      const docRef = db.collection(`organizations/${orgId}/files`).doc(docId)
-      await docRef.set(data, { merge: true })
-    }
-    else {
-      const docRef = db.collection(`organizations/${orgId}/files`).doc()
-      await docRef.set(data)
-      docId = docRef.id
-    }
+  console.log(data)
+  const orgId = data.orgId
+  if (docId) {
+    const docRef = db.collection(`organizations/${orgId}/files`).doc(docId)
+    await docRef.set(data, { merge: true })
+  }
+  else {
+    const docRef = db.collection(`organizations/${orgId}/files`).doc()
+    await docRef.set(data)
+    docId = docRef.id
   }
   console.log(docId)
   return { docId }
@@ -426,91 +431,87 @@ exports.initFirestore = onCall(async (request) => {
 })
 
 exports.removeNonRegisteredUser = onCall(async (request) => {
+  assertCallableUser(request)
   const data = request.data
-  const auth = request.auth
-  if (data.uid === auth.uid) {
-    const stagedUser = await db.collection('staged-users').doc(data.docId).get()
-    if (stagedUser.exists) {
-      const stagedUserData = stagedUser.data()
+  const stagedUser = await db.collection('staged-users').doc(data.docId).get()
+  if (stagedUser.exists) {
+    const stagedUserData = stagedUser.data()
 
-      const rolesExist = stagedUserData.roles && Object.keys(stagedUserData.roles).length !== 0
-      const specialPermissionsExist = stagedUserData.specialPermissions && Object.keys(stagedUserData.specialPermissions).length !== 0
-      const userIdExistsAndNotBlank = stagedUserData.userId && stagedUserData.userId !== ''
+    const rolesExist = stagedUserData.roles && Object.keys(stagedUserData.roles).length !== 0
+    const specialPermissionsExist = stagedUserData.specialPermissions && Object.keys(stagedUserData.specialPermissions).length !== 0
+    const userIdExistsAndNotBlank = stagedUserData.userId && stagedUserData.userId !== ''
 
-      if (!rolesExist && !specialPermissionsExist && !userIdExistsAndNotBlank) {
-        await db.collection('staged-users').doc(data.docId).delete()
-        return { success: true, message: '' }
+    if (!rolesExist && !specialPermissionsExist && !userIdExistsAndNotBlank) {
+      await db.collection('staged-users').doc(data.docId).delete()
+      return { success: true, message: '' }
+    }
+    else {
+      let message = ''
+      if (rolesExist && specialPermissionsExist) {
+        message = 'Cannot delete because the non-registered user still has roles and special permissions assigned.'
       }
-      else {
-        let message = ''
-        if (rolesExist && specialPermissionsExist) {
-          message = 'Cannot delete because the non-registered user still has roles and special permissions assigned.'
-        }
-        else if (rolesExist) {
-          message = 'Cannot delete because the non-registered user still has roles assigned.'
-        }
-        else if (specialPermissionsExist) {
-          message = 'Cannot delete because the non-registered user still has special permissions assigned.'
-        }
-        else if (userIdExistsAndNotBlank) {
-          message = 'Cannot delete because the user is registered.'
-        }
-        return { success: false, message }
+      else if (rolesExist) {
+        message = 'Cannot delete because the non-registered user still has roles assigned.'
       }
+      else if (specialPermissionsExist) {
+        message = 'Cannot delete because the non-registered user still has special permissions assigned.'
+      }
+      else if (userIdExistsAndNotBlank) {
+        message = 'Cannot delete because the user is registered.'
+      }
+      return { success: false, message }
     }
   }
   return { success: false, message: 'Non-registered user not found.' }
 })
 
 exports.currentUserRegister = onCall(async (request) => {
+  assertCallableUser(request)
   const data = request.data
-  const auth = request.auth
-  if (data.uid === auth.uid) {
-    const stagedUser = await db.collection('staged-users').doc(data.registrationCode).get()
-    if (!stagedUser.exists) {
-      return { success: false, message: 'Registration code not found.' }
+  const stagedUser = await db.collection('staged-users').doc(data.registrationCode).get()
+  if (!stagedUser.exists) {
+    return { success: false, message: 'Registration code not found.' }
+  }
+  else {
+    const stagedUserData = await stagedUser.data()
+    let process = false
+    if (stagedUserData.isTemplate) {
+      process = true
     }
-    else {
-      const stagedUserData = await stagedUser.data()
-      let process = false
-      if (stagedUserData.isTemplate) {
-        process = true
-      }
-      if (!stagedUserData.isTemplate && stagedUserData.userId === '') {
-        process = true
-      }
-      if (!process) {
-        return { success: false, message: 'Registration code not valid.' }
-      }
-      const newRoles = stagedUserData.roles || {}
-      const currentUser = await db.collection('users').doc(data.uid).get()
-      const currentUserData = await currentUser.data()
-      const currentRoles = currentUserData.roles || {}
-      const currentUserCollectionPaths = currentUserData.collectionPaths || []
-      let newRole = {}
-      if (stagedUserData.subCreate && Object.keys(stagedUserData.subCreate).length !== 0 && stagedUserData.isTemplate) {
-        if (!data.dynamicDocumentFieldValue) {
-          return { success: false, message: 'Dynamic document field value is required.' }
-        }
-        const rootPath = stagedUserData.subCreate.rootPath
-        const newDoc = stagedUserData.subCreate.documentStructure
-        newDoc[stagedUserData.subCreate.dynamicDocumentField] = data.dynamicDocumentFieldValue
-        const addedDoc = await db.collection(rootPath).add(newDoc)
-        await db.collection(rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
-        newRole = { [`${rootPath}-${addedDoc.id}`]: { collectionPath: `${rootPath}-${addedDoc.id}`, role: stagedUserData.subCreate.role } }
-      }
-      const combinedRoles = { ...currentRoles, ...newRoles, ...newRole }
-      Object.values(combinedRoles).forEach((role) => {
-        if (!currentUserCollectionPaths.includes(role.collectionPath)) {
-          currentUserCollectionPaths.push(role.collectionPath)
-        }
-      })
-      await db.collection('staged-users').doc(currentUserData.stagedDocId).update({ roles: combinedRoles, collectionPaths: currentUserCollectionPaths })
-      if (!stagedUserData.isTemplate) {
-        await db.collection('staged-users').doc(data.registrationCode).delete()
-      }
-      return { success: true, message: '' }
+    if (!stagedUserData.isTemplate && stagedUserData.userId === '') {
+      process = true
     }
+    if (!process) {
+      return { success: false, message: 'Registration code not valid.' }
+    }
+    const newRoles = stagedUserData.roles || {}
+    const currentUser = await db.collection('users').doc(data.uid).get()
+    const currentUserData = await currentUser.data()
+    const currentRoles = currentUserData.roles || {}
+    const currentUserCollectionPaths = currentUserData.collectionPaths || []
+    let newRole = {}
+    if (stagedUserData.subCreate && Object.keys(stagedUserData.subCreate).length !== 0 && stagedUserData.isTemplate) {
+      if (!data.dynamicDocumentFieldValue) {
+        return { success: false, message: 'Dynamic document field value is required.' }
+      }
+      const rootPath = stagedUserData.subCreate.rootPath
+      const newDoc = stagedUserData.subCreate.documentStructure
+      newDoc[stagedUserData.subCreate.dynamicDocumentField] = data.dynamicDocumentFieldValue
+      const addedDoc = await db.collection(rootPath).add(newDoc)
+      await db.collection(rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
+      newRole = { [`${rootPath}-${addedDoc.id}`]: { collectionPath: `${rootPath}-${addedDoc.id}`, role: stagedUserData.subCreate.role } }
+    }
+    const combinedRoles = { ...currentRoles, ...newRoles, ...newRole }
+    Object.values(combinedRoles).forEach((role) => {
+      if (!currentUserCollectionPaths.includes(role.collectionPath)) {
+        currentUserCollectionPaths.push(role.collectionPath)
+      }
+    })
+    await db.collection('staged-users').doc(currentUserData.stagedDocId).update({ roles: combinedRoles, collectionPaths: currentUserCollectionPaths })
+    if (!stagedUserData.isTemplate) {
+      await db.collection('staged-users').doc(data.registrationCode).delete()
+    }
+    return { success: true, message: '' }
   }
 })
 
@@ -522,52 +523,51 @@ exports.checkOrgIdExists = onCall(async (request) => {
 })
 
 exports.deleteSelf = onCall(async (request) => {
-  if (request.data.uid === request.auth.uid) {
-    try {
-      const userDoc = await db.collection('staged-users').doc(request.auth.uid).get()
-      const userData = userDoc.data()
-      const userCollectionPaths = userData.collectionPaths || []
+  assertCallableUser(request)
+  try {
+    const userDoc = await db.collection('staged-users').doc(request.auth.uid).get()
+    const userData = userDoc.data()
+    const userCollectionPaths = userData.collectionPaths || []
 
-      for (const path of userCollectionPaths) {
-        const usersWithSamePath = await db.collection('staged-users').where('collectionPaths', 'array-contains', path).get()
+    for (const path of userCollectionPaths) {
+      const usersWithSamePath = await db.collection('staged-users').where('collectionPaths', 'array-contains', path).get()
 
-        // If no other users have the same collection path, delete the path and all documents and collections under it
-        if (usersWithSamePath.size <= 1) {
-          const adjustedPath = path.replace(/-/g, '/')
-          const docRef = db.doc(adjustedPath)
-          const doc = await docRef.get()
+      // If no other users have the same collection path, delete the path and all documents and collections under it
+      if (usersWithSamePath.size <= 1) {
+        const adjustedPath = path.replace(/-/g, '/')
+        const docRef = db.doc(adjustedPath)
+        const doc = await docRef.get()
 
-          if (doc.exists) {
-            // If the path is a document, delete it directly
-            await docRef.delete()
-          }
-          else {
-            // If the path is a collection, delete all documents under it
-            const docsToDelete = await db.collection(adjustedPath).get()
-            const batch = db.batch()
-            docsToDelete.docs.forEach((doc) => {
-              batch.delete(doc.ref)
-            })
-            await batch.commit()
-          }
+        if (doc.exists) {
+          // If the path is a document, delete it directly
+          await docRef.delete()
+        }
+        else {
+          // If the path is a collection, delete all documents under it
+          const docsToDelete = await db.collection(adjustedPath).get()
+          const batch = db.batch()
+          docsToDelete.docs.forEach((doc) => {
+            batch.delete(doc.ref)
+          })
+          await batch.commit()
         }
       }
-
-      // Delete from 'staged-users' collection
-      await db.collection('staged-users').doc(request.data.uid).delete()
-
-      // Delete from 'users' collection
-      await db.collection('users').doc(request.data.uid).delete()
-
-      // Delete the user from Firebase
-      await admin.auth().deleteUser(request.data.uid)
-
-      return { success: true }
     }
-    catch (error) {
-      console.error('Error deleting user:', error)
-      return { success: false, error }
-    }
+
+    // Delete from 'staged-users' collection
+    await db.collection('staged-users').doc(request.data.uid).delete()
+
+    // Delete from 'users' collection
+    await db.collection('users').doc(request.data.uid).delete()
+
+    // Delete the user from Firebase
+    await admin.auth().deleteUser(request.data.uid)
+
+    return { success: true }
+  }
+  catch (error) {
+    console.error('Error deleting user:', error)
+    return { success: false, error }
   }
 })
 
