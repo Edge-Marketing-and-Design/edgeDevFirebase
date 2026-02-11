@@ -11,6 +11,56 @@ if (!accountId || !namespaceId || !apiKey) {
 }
 
 const base = `https://api.cloudflare.com/client/v4/accounts/${accountId}/storage/kv/namespaces/${namespaceId}`
+const MAX_RETRIES = Number(process.env.KV_HTTP_MAX_RETRIES || 5)
+const BASE_DELAY_MS = Number(process.env.KV_HTTP_BASE_DELAY_MS || 250)
+const MAX_DELAY_MS = Number(process.env.KV_HTTP_MAX_DELAY_MS || 5000)
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+function parseRetryAfterMs(retryAfterHeader) {
+  if (!retryAfterHeader)
+    return 0
+  const raw = Array.isArray(retryAfterHeader) ? retryAfterHeader[0] : retryAfterHeader
+  const asNumber = Number(raw)
+  if (Number.isFinite(asNumber) && asNumber >= 0)
+    return asNumber * 1000
+  const asDate = Date.parse(String(raw))
+  if (!Number.isNaN(asDate))
+    return Math.max(0, asDate - Date.now())
+  return 0
+}
+
+function shouldRetryError(err) {
+  const status = Number(err?.response?.status || 0)
+  if (status === 429 || status === 408)
+    return true
+  if (status >= 500 && status <= 599)
+    return true
+  if (!status && (err?.code || err?.message))
+    return true
+  return false
+}
+
+async function requestWithRetry(run, label = 'kv-request') {
+  let attempt = 0
+  for (;;) {
+    try {
+      return await run()
+    }
+    catch (err) {
+      if (!shouldRetryError(err) || attempt >= MAX_RETRIES)
+        throw err
+      const retryAfterMs = parseRetryAfterMs(err?.response?.headers?.['retry-after'])
+      const expo = Math.min(MAX_DELAY_MS, BASE_DELAY_MS * (2 ** attempt))
+      const jitter = Math.floor(Math.random() * 200)
+      const delayMs = Math.max(retryAfterMs, expo + jitter)
+      const status = err?.response?.status || 'network'
+      console.warn(`[kvClient] retrying ${label} (attempt ${attempt + 1}/${MAX_RETRIES}, status ${status}) in ${delayMs}ms`)
+      await sleep(delayMs)
+      attempt += 1
+    }
+  }
+}
 
 function parseJsonIfNeeded(body) {
   if (body === null || body === undefined) {
@@ -61,7 +111,7 @@ async function put(key, value, opts = undefined) {
     form.append('metadata', JSON.stringify(opts.metadata))
     const formHeaders = form.getHeaders()
     Object.assign(headers, formHeaders)
-    const res = await axios.put(url, form, { headers })
+    const res = await requestWithRetry(() => axios.put(url, form, { headers }), `put:${key}`)
     if (res.status !== 200) {
       throw new Error(`KV put failed: ${res.status} ${res.statusText}`)
     }
@@ -77,7 +127,7 @@ async function put(key, value, opts = undefined) {
     headers['Content-Type'] = 'text/plain'
   }
 
-  const res = await axios.put(url, data, { headers })
+  const res = await requestWithRetry(() => axios.put(url, data, { headers }), `put:${key}`)
   if (res.status !== 200) {
     throw new Error(`KV put failed: ${res.status} ${res.statusText}`)
   }
@@ -99,11 +149,11 @@ async function putIndexMeta(key, metadata, opts = undefined) {
 async function get(key, type = 'text') {
   const url = `${base}/values/${encodeURIComponent(key)}`
   try {
-    const res = await axios.get(url, {
+    const res = await requestWithRetry(() => axios.get(url, {
       headers: { Authorization: `Bearer ${apiKey}` },
       responseType: 'text',
       transformResponse: [x => x],
-    })
+    }), `get:${key}`)
     if (type === 'json') {
       return parseJsonIfNeeded(res.data)
     }
@@ -119,9 +169,17 @@ async function get(key, type = 'text') {
 
 async function del(key) {
   const url = `${base}/values/${encodeURIComponent(key)}`
-  await Promise.allSettled([
-    axios.delete(url, { headers: { Authorization: `Bearer ${apiKey}` } }),
-  ])
+  try {
+    await requestWithRetry(
+      () => axios.delete(url, { headers: { Authorization: `Bearer ${apiKey}` } }),
+      `del:${key}`,
+    )
+  }
+  catch (err) {
+    if (err?.response?.status === 404)
+      return
+    throw err
+  }
 }
 
 /**
@@ -139,7 +197,10 @@ async function listKeys({ prefix = '', limit = 1000, cursor = '' } = {}) {
   if (cursor) {
     u.searchParams.set('cursor', cursor)
   }
-  const res = await axios.get(u.toString(), { headers: { Authorization: `Bearer ${apiKey}` } })
+  const res = await requestWithRetry(
+    () => axios.get(u.toString(), { headers: { Authorization: `Bearer ${apiKey}` } }),
+    `list:${prefix || 'all'}`,
+  )
   return res.data
 }
 

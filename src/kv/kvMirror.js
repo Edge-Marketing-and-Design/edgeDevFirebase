@@ -5,11 +5,113 @@
 // - Index-key metadata always includes { canonical: <canonicalKey> }.
 // - Keeps a small manifest per canonical key to clean up all index keys on delete.
 
-const { onDocumentWritten } = require('../config.js')
+const { onDocumentWritten, db, Firestore, logger } = require('../config.js')
 const kv = require('./kvClient')
 
 function json(x) {
   return JSON.stringify(x)
+}
+
+const KV_RETRY_TOPIC = process.env.KV_RETRY_TOPIC || 'kv-mirror-retry'
+const INDEX_WRITE_CONCURRENCY = Number(process.env.KV_MIRROR_INDEX_CONCURRENCY || 20)
+
+function toSortedUniqueStrings(values = []) {
+  return [...new Set((Array.isArray(values) ? values : [])
+    .filter(Boolean)
+    .map(String))]
+    .sort()
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(',')}]`
+  }
+  if (value && typeof value === 'object') {
+    const keys = Object.keys(value).sort()
+    return `{${keys.map(k => `${JSON.stringify(k)}:${stableStringify(value[k])}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function areSameStrings(a = [], b = []) {
+  if (a.length !== b.length)
+    return false
+  for (let i = 0; i < a.length; i += 1) {
+    if (a[i] !== b[i])
+      return false
+  }
+  return true
+}
+
+function normalizeConcurrency(value) {
+  const n = Number(value)
+  if (!Number.isFinite(n) || n < 1)
+    return 1
+  return Math.floor(n)
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  const values = Array.isArray(items) ? items : []
+  if (!values.length)
+    return
+  const max = normalizeConcurrency(limit)
+  let cursor = 0
+  const workers = Array.from({ length: Math.min(max, values.length) }, async () => {
+    for (;;) {
+      const idx = cursor
+      cursor += 1
+      if (idx >= values.length)
+        return
+      await worker(values[idx], idx)
+    }
+  })
+  await Promise.all(workers)
+}
+
+async function enqueueKvRetry(payload, minuteDelay = 1) {
+  const safePayload = payload && typeof payload === 'object' ? payload : {}
+  await db.collection('topic-queue').add({
+    topic: KV_RETRY_TOPIC,
+    payload: {
+      ...safePayload,
+      attempt: Number(safePayload.attempt || 0),
+    },
+    minuteDelay: Number(minuteDelay || 0),
+    retry: 0,
+    timestamp: Firestore.FieldValue.serverTimestamp(),
+  })
+}
+
+async function safeKvOperation({
+  run,
+  payload,
+  label,
+}) {
+  try {
+    await run()
+    return true
+  }
+  catch (err) {
+    const message = String(err?.message || err || 'KV operation failed')
+    logger.warn('KV operation failed; queued for retry', {
+      label,
+      error: message.slice(0, 500),
+      key: payload?.key,
+      op: payload?.op,
+    })
+    try {
+      await enqueueKvRetry(payload)
+    }
+    catch (queueErr) {
+      logger.error('Failed to enqueue KV retry', {
+        label,
+        key: payload?.key,
+        op: payload?.op,
+        error: String(queueErr?.message || queueErr || 'enqueue failed').slice(0, 500),
+      })
+    }
+    return false
+  }
 }
 
 function slugIndexValue(value, maxLength = 80) {
@@ -53,6 +155,10 @@ function createKvMirrorHandler({
     const data = after?.exists ? after.data() : null
 
     const canonicalKey = makeCanonicalKey(params, data)
+    if (!canonicalKey) {
+      logger.warn('KV mirror skipped due to missing canonical key', { document })
+      return
+    }
     const indexingEnabled = typeof makeIndexKeys === 'function'
     const manifestKey = indexingEnabled ? `idx:manifest:${canonicalKey}` : null
 
@@ -65,16 +171,25 @@ function createKvMirrorHandler({
         catch (_) {
           prev = null
         }
-        const keys = Array.isArray(prev?.indexKeys) ? prev.indexKeys : []
-        const deletions = [
-          ...keys.map(k => kv.del(k)),
-          kv.del(canonicalKey),
-          kv.del(manifestKey),
-        ]
-        await Promise.allSettled(deletions)
+        const keys = toSortedUniqueStrings([
+          ...(Array.isArray(prev?.indexKeys) ? prev.indexKeys : []),
+          canonicalKey,
+          manifestKey,
+        ])
+        await runWithConcurrency(keys, INDEX_WRITE_CONCURRENCY, async (key) => {
+          await safeKvOperation({
+            run: () => kv.del(key),
+            payload: { op: 'del', key, source: 'kvMirror' },
+            label: `del:${key}`,
+          })
+        })
       }
       else {
-        await kv.del(canonicalKey)
+        await safeKvOperation({
+          run: () => kv.del(canonicalKey),
+          payload: { op: 'del', key: canonicalKey, source: 'kvMirror' },
+          label: `del:${canonicalKey}`,
+        })
       }
       return
     }
@@ -85,15 +200,25 @@ function createKvMirrorHandler({
       ? { ...customMetaCandidate, canonical: canonicalKey }
       : baseMeta
 
-    await kv.put(canonicalKey, serialize(data), { metadata: metaValue })
+    const serializedData = serialize(data)
+    await safeKvOperation({
+      run: () => kv.put(canonicalKey, serializedData, { metadata: metaValue }),
+      payload: {
+        op: 'put',
+        key: canonicalKey,
+        value: serializedData,
+        opts: { metadata: metaValue },
+        source: 'kvMirror',
+      },
+      label: `put:${canonicalKey}`,
+    })
 
     if (!indexingEnabled) {
       return
     }
 
-    const nextIndexKeys = (await Promise.resolve(makeIndexKeys(params, data)) || [])
-      .filter(Boolean)
-      .map(String)
+    const resolvedIndexKeys = await Promise.resolve(makeIndexKeys(params, data))
+    const nextIndexKeys = toSortedUniqueStrings(resolvedIndexKeys || [])
 
     let prev = null
     try {
@@ -103,16 +228,49 @@ function createKvMirrorHandler({
       prev = null
     }
 
-    const oldIndexKeys = Array.isArray(prev?.indexKeys) ? prev.indexKeys : []
-    const { toRemove } = setDiff(oldIndexKeys, nextIndexKeys)
+    const oldIndexKeys = toSortedUniqueStrings(Array.isArray(prev?.indexKeys) ? prev.indexKeys : [])
+    const previousMetaHash = typeof prev?.metadataHash === 'string' ? prev.metadataHash : ''
+    const currentMetaHash = stableStringify(metaValue)
+    const { toRemove, toAdd } = setDiff(oldIndexKeys, nextIndexKeys)
+    const shouldRewriteAllIndexKeys = previousMetaHash !== currentMetaHash
+    const keysToUpsert = shouldRewriteAllIndexKeys ? nextIndexKeys : toAdd
 
-    const upserts = nextIndexKeys.map(k => kv.putIndexMeta(k, metaValue))
-    await Promise.allSettled(upserts)
+    await runWithConcurrency(keysToUpsert, INDEX_WRITE_CONCURRENCY, async (key) => {
+      await safeKvOperation({
+        run: () => kv.putIndexMeta(key, metaValue),
+        payload: {
+          op: 'putIndexMeta',
+          key,
+          metadata: metaValue,
+          source: 'kvMirror',
+        },
+        label: `putIndexMeta:${key}`,
+      })
+    })
 
-    const removals = toRemove.map(k => kv.del(k))
-    await Promise.allSettled(removals)
+    await runWithConcurrency(toRemove, INDEX_WRITE_CONCURRENCY, async (key) => {
+      await safeKvOperation({
+        run: () => kv.del(key),
+        payload: { op: 'del', key, source: 'kvMirror' },
+        label: `del:${key}`,
+      })
+    })
 
-    await kv.put(manifestKey, { indexKeys: nextIndexKeys })
+    const manifestUnchanged = areSameStrings(oldIndexKeys, nextIndexKeys)
+      && previousMetaHash === currentMetaHash
+    if (!manifestUnchanged) {
+      const manifestValue = { indexKeys: nextIndexKeys, metadataHash: currentMetaHash }
+      await safeKvOperation({
+        run: () => kv.put(manifestKey, manifestValue),
+        payload: {
+          op: 'put',
+          key: manifestKey,
+          value: manifestValue,
+          source: 'kvMirror',
+        },
+        label: `put:${manifestKey}`,
+      })
+    }
   })
 }
 
@@ -121,6 +279,7 @@ function createKvMirrorHandlerFromFields({
   uniqueKey,
   indexKeys = [],
   metadataKeys = [],
+  metaKeyTruncate = {},
   serialize = json,
 }) {
   if (!uniqueKey || typeof uniqueKey !== 'string') {
@@ -193,8 +352,18 @@ function createKvMirrorHandlerFromFields({
   const makeMetadata = (data) => {
     const meta = {}
     const keys = Array.isArray(metadataKeys) ? metadataKeys : []
+    const truncateMap = metaKeyTruncate && typeof metaKeyTruncate === 'object'
+      ? metaKeyTruncate
+      : {}
     for (const key of keys) {
-      meta[key] = data?.[key] ?? ''
+      const raw = data?.[key] ?? ''
+      const truncateLength = Number(truncateMap?.[key])
+      if (Number.isFinite(truncateLength) && truncateLength >= 0 && typeof raw === 'string') {
+        meta[key] = raw.slice(0, Math.floor(truncateLength))
+      }
+      else {
+        meta[key] = raw
+      }
     }
     return meta
   }
