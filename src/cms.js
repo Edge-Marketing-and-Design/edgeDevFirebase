@@ -1092,8 +1092,11 @@ exports.onSiteWritten = createKvMirrorHandler({
   document: 'organizations/{orgId}/published-site-settings/{siteId}',
   makeCanonicalKey: ({ orgId, siteId }) =>
     `sites:${orgId}:${siteId}`,
-  makeIndexKeys: ({ orgId }, data) => {
+  makeIndexKeys: ({ orgId, siteId }, data) => {
     const keys = []
+    const siteDocId = slug(siteId)
+    if (siteDocId)
+      keys.push(`idx:sites:docId:${orgId}:${siteDocId}:${siteId}`)
     const domains = Array.isArray(data?.domains) ? data.domains : []
     for (const domain of domains) {
       const st = slug(domain)
