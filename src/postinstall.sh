@@ -62,6 +62,86 @@ fs.writeFileSync(destPath, `${JSON.stringify(dest, null, 2)}\n`)
 NODE
 }
 
+merge_firestore_indexes_json () {
+  local src="$1"
+  local dest="$2"
+
+  if [ ! -f "$src" ]; then
+    return
+  fi
+
+  if [ ! -f "$dest" ]; then
+    cp "$src" "$dest"
+    return
+  fi
+
+  node - "$src" "$dest" <<'NODE'
+const fs = require('fs')
+const [,, srcPath, destPath] = process.argv
+
+const readJson = (path) => {
+  try {
+    return JSON.parse(fs.readFileSync(path, 'utf8'))
+  } catch {
+    return {}
+  }
+}
+
+const src = readJson(srcPath)
+const dest = readJson(destPath)
+
+const normalizeArray = (value) => Array.isArray(value) ? value : []
+
+const indexFieldKey = (field) => {
+  const parts = [field.fieldPath || '']
+  if (Object.prototype.hasOwnProperty.call(field, 'order'))
+    parts.push(`order:${field.order}`)
+  if (Object.prototype.hasOwnProperty.call(field, 'arrayConfig'))
+    parts.push(`arrayConfig:${field.arrayConfig}`)
+  if (Object.prototype.hasOwnProperty.call(field, 'vectorConfig'))
+    parts.push(`vectorConfig:${JSON.stringify(field.vectorConfig)}`)
+  return parts.join('|')
+}
+
+const indexKey = (index) => {
+  const fields = normalizeArray(index.fields).map(indexFieldKey).join('>')
+  return `${index.collectionGroup || ''}|${index.queryScope || ''}|${fields}`
+}
+
+const fieldOverrideKey = (fieldOverride) =>
+  `${fieldOverride.collectionGroup || ''}|${fieldOverride.fieldPath || ''}`
+
+const mergeByKey = (destItems, srcItems, getKey) => {
+  const merged = new Map()
+  for (const item of destItems)
+    merged.set(getKey(item), item)
+  for (const item of srcItems)
+    merged.set(getKey(item), item)
+  return [...merged.values()]
+}
+
+const mergedIndexes = mergeByKey(
+  normalizeArray(dest.indexes),
+  normalizeArray(src.indexes),
+  indexKey
+)
+
+const mergedFieldOverrides = mergeByKey(
+  normalizeArray(dest.fieldOverrides),
+  normalizeArray(src.fieldOverrides),
+  fieldOverrideKey
+)
+
+const merged = {
+  ...dest,
+  indexes: mergedIndexes,
+  fieldOverrides: mergedFieldOverrides
+}
+
+fs.writeFileSync(destPath, `${JSON.stringify(merged, null, 2)}\n`)
+NODE
+}
+
 
 # Check if the destination file exists
 if [ ! -f "$project_root/firestore.rules" ]; then
@@ -78,6 +158,8 @@ awk '/\/\/ #EDGE FIREBASE RULES START/,/\/\/ #EDGE FIREBASE RULES END/' ./src/fi
   sed '1d;$d' | \
   sed -e '1s/^/\/\/ #EDGE FIREBASE RULES START\n/' -e '$s/$/\n\/\/ #EDGE FIREBASE RULES END/' \
   >> "$project_root/firestore.rules";
+
+merge_firestore_indexes_json "./src/firestore.indexes.json" "$project_root/firestore.indexes.json"
 
 
 # Check if the destination file exists

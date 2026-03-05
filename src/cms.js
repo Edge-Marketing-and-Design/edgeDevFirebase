@@ -11,6 +11,7 @@ const {
   onDocumentDeleted,
   onDocumentCreated,
   onMessagePublished,
+  onSchedule,
   onRequest,
   Firestore,
   permissionCheck,
@@ -1035,6 +1036,50 @@ exports.fontFileUpdated = onDocumentUpdated({ document: 'organizations/{orgId}/f
 })
 
 const slug = s => String(s || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 80)
+const toBool = (value, fallback = false) => {
+  if (typeof value === 'boolean')
+    return value
+  return fallback
+}
+
+const eventEndAtMs = (eventData = {}) => {
+  const endAtUtc = String(eventData.endAtUtc || '').trim()
+  if (endAtUtc) {
+    const utcMs = Date.parse(endAtUtc)
+    if (Number.isFinite(utcMs))
+      return utcMs
+  }
+
+  const endAt = String(eventData.endAt || '').trim()
+  if (!endAt)
+    return Number.NaN
+  const fallbackMs = Date.parse(endAt)
+  return Number.isFinite(fallbackMs) ? fallbackMs : Number.NaN
+}
+
+const canPublishEventAt = (postData = {}, publishAtMs = Date.now()) => {
+  const rawType = String(postData?.type || 'post').trim().toLowerCase()
+  if (rawType !== 'event')
+    return { allowed: true, reason: '' }
+
+  const eventData = (postData && typeof postData.event === 'object') ? postData.event : {}
+  const unpublishPastEvent = toBool(eventData.unpublishPastEvent, true)
+  if (!unpublishPastEvent)
+    return { allowed: true, reason: '' }
+
+  const endAtMs = eventEndAtMs(eventData)
+  if (!Number.isFinite(endAtMs))
+    return { allowed: true, reason: '' }
+
+  if (endAtMs <= publishAtMs) {
+    return {
+      allowed: false,
+      reason: 'Event endAt is earlier than publishAt while unpublishPastEvent is enabled.',
+    }
+  }
+  return { allowed: true, reason: '' }
+}
+
 const yyyyMM = (d) => {
   const dt = d ? new Date(d) : new Date()
   const y = dt.getUTCFullYear()
@@ -1061,6 +1106,24 @@ exports.onPostWritten = createKvMirrorHandler({
         keys.push(`idx:posts:tags:${orgId}:${siteId}:${st}:${postId}`)
     }
 
+    // by type
+    const rawType = String(data?.type || 'post').trim().toLowerCase()
+    if (rawType) {
+      keys.push(`idx:posts:type:${orgId}:${siteId}:${slug(rawType)}:${postId}`)
+    }
+
+    const eventData = (data && typeof data.event === 'object') ? data.event : {}
+    const startAtValue = String(eventData.startAt || '').trim()
+    if (startAtValue) {
+      keys.push(`idx:posts:startAt:${orgId}:${siteId}:${startAtValue}:${postId}`)
+    }
+    const endAtValue = String(eventData.endAt || '').trim()
+    if (endAtValue) {
+      keys.push(`idx:posts:endAt:${orgId}:${siteId}:${endAtValue}:${postId}`)
+    }
+    const isPastValue = toBool(eventData.isPast, false) ? 'true' : 'false'
+    keys.push(`idx:posts:isPast:${orgId}:${siteId}:${isPastValue}:${postId}`)
+
     // by date (archive buckets)
     const pub = data?.publishedAt || data?.doc_created_at || data?.createdAt || null
     if (pub)
@@ -1077,16 +1140,226 @@ exports.onPostWritten = createKvMirrorHandler({
   serialize: data => JSON.stringify(data),
 
   // tiny metadata so you can render lists without N GETs (stored in meta:{key})
-  makeMetadata: data => ({
-    title: data?.title || '',
-    blurb: data?.blurb || '',
-    doc_created_at: data?.doc_created_at || '',
-    featuredImage: data?.featuredImage || '',
-    name: data?.name || '',
-  }),
+  makeMetadata: (data) => {
+    const eventData = (data && typeof data.event === 'object') ? data.event : {}
+    const startAt = String(eventData.startAt || '')
+    const endAt = String(eventData.endAt || '')
+    return {
+      title: data?.title || '',
+      blurb: data?.blurb || '',
+      doc_created_at: data?.doc_created_at || '',
+      featuredImage: data?.featuredImage || '',
+      name: data?.name || '',
+      type: (String(data?.type || 'post').trim().toLowerCase() || 'post'),
+      startAt,
+      endAt,
+      isPast: toBool(eventData.isPast, false),
+      locationName: String(eventData.locationName || ''),
+    }
+  },
 
   timeoutSeconds: 180,
 })
+
+exports.syncPastPublishedEvents = onSchedule(
+  { schedule: 'every 1 minutes', timeoutSeconds: 540 },
+  async () => {
+    const pageSize = 250
+    let scanned = 0
+    let eventDocs = 0
+    let updated = 0
+    let unpublished = 0
+    let lastDoc = null
+
+    while (true) {
+      let query = db.collectionGroup('published_posts')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize)
+
+      if (lastDoc)
+        query = query.startAfter(lastDoc)
+
+      const snap = await query.get()
+      if (snap.empty)
+        break
+
+      let batch = db.batch()
+      let ops = 0
+
+      for (const docSnap of snap.docs) {
+        scanned += 1
+        const data = docSnap.data() || {}
+        const rawType = String(data?.type || 'post').trim().toLowerCase()
+        if (rawType !== 'event')
+          continue
+        eventDocs += 1
+        const eventData = (data && typeof data.event === 'object') ? data.event : {}
+        const endAtMs = eventEndAtMs(eventData)
+        const isPast = Number.isFinite(endAtMs) ? endAtMs <= Date.now() : false
+        const unpublishPastEvent = toBool(eventData.unpublishPastEvent, true)
+
+        if (isPast && unpublishPastEvent) {
+          batch.delete(docSnap.ref)
+          unpublished += 1
+          ops += 1
+        }
+        else {
+          const needsIsPastUpdate = toBool(eventData.isPast, false) !== isPast
+          const needsUnpublishDefault = typeof eventData.unpublishPastEvent !== 'boolean'
+          if (needsIsPastUpdate || needsUnpublishDefault) {
+            const updates = {}
+            if (needsIsPastUpdate)
+              updates['event.isPast'] = isPast
+            if (needsUnpublishDefault)
+              updates['event.unpublishPastEvent'] = true
+            batch.update(docSnap.ref, updates)
+            updated += 1
+            ops += 1
+          }
+        }
+
+        if (ops >= 400) {
+          await batch.commit()
+          batch = db.batch()
+          ops = 0
+        }
+      }
+
+      if (ops > 0)
+        await batch.commit()
+
+      lastDoc = snap.docs[snap.docs.length - 1]
+      if (snap.size < pageSize)
+        break
+    }
+
+    logger.log('syncPastPublishedEvents complete', {
+      scanned,
+      eventDocs,
+      updated,
+      unpublished,
+    })
+  },
+)
+
+exports.publishScheduledPosts = onSchedule(
+  { schedule: 'every 1 minutes', timeoutSeconds: 540 },
+  async () => {
+    const pageSize = 200
+    const nowMs = Date.now()
+    const nowIso = new Date(nowMs).toISOString()
+
+    let scanned = 0
+    let withSchedule = 0
+    let published = 0
+    let skipped = 0
+    let unscheduled = 0
+
+    let lastDoc = null
+
+    for (;;) {
+      let query = db.collectionGroup('posts')
+        .orderBy(admin.firestore.FieldPath.documentId())
+        .limit(pageSize)
+
+      if (lastDoc)
+        query = query.startAfter(lastDoc)
+
+      const snap = await query.get()
+
+      if (snap.empty)
+        break
+
+      let batch = db.batch()
+      let ops = 0
+
+      for (const draftSnap of snap.docs) {
+        scanned += 1
+        const draftData = draftSnap.data() || {}
+        const publishAtRaw = String(draftData.publishAt || '').trim()
+        if (!publishAtRaw)
+          continue
+        withSchedule += 1
+        const publishAtMs = publishAtRaw ? Date.parse(publishAtRaw) : Number.NaN
+        const effectivePublishMs = Number.isFinite(publishAtMs) ? publishAtMs : nowMs
+        const isDue = Number.isFinite(publishAtMs) ? publishAtMs <= nowMs : true
+        if (!isDue)
+          continue
+
+        const pathParts = draftSnap.ref.path.split('/')
+        if (pathParts.length !== 6) {
+          batch.update(draftSnap.ref, {
+            publishAt: Firestore.FieldValue.delete(),
+            publishAtTimezone: Firestore.FieldValue.delete(),
+          })
+          unscheduled += 1
+          ops += 1
+          continue
+        }
+        const orgId = pathParts[1]
+        const siteId = pathParts[3]
+        const postId = pathParts[5]
+
+        const canPublish = canPublishEventAt(draftData, effectivePublishMs)
+        if (!canPublish.allowed) {
+          batch.update(draftSnap.ref, {
+            publishAt: Firestore.FieldValue.delete(),
+            publishAtTimezone: Firestore.FieldValue.delete(),
+            publishAtError: canPublish.reason,
+          })
+          skipped += 1
+          unscheduled += 1
+          ops += 1
+        }
+        else {
+          const publishedRef = db.collection('organizations').doc(orgId)
+            .collection('sites').doc(siteId)
+            .collection('published_posts').doc(postId)
+
+          const publishedAtIso = new Date().toISOString()
+          const publishPayload = { ...draftData }
+          delete publishPayload.publishAt
+          delete publishPayload.publishAtTimezone
+          publishPayload.publishAtError = ''
+          publishPayload.publishedAt = publishedAtIso
+
+          batch.set(publishedRef, publishPayload, { merge: false })
+          batch.update(draftSnap.ref, {
+            publishedAt: publishedAtIso,
+            publishAt: Firestore.FieldValue.delete(),
+            publishAtTimezone: Firestore.FieldValue.delete(),
+            publishAtError: Firestore.FieldValue.delete(),
+          })
+          published += 1
+          unscheduled += 1
+          ops += 2
+        }
+
+        if (ops >= 400) {
+          await batch.commit()
+          batch = db.batch()
+          ops = 0
+        }
+      }
+
+      if (ops > 0)
+        await batch.commit()
+
+      lastDoc = snap.docs[snap.docs.length - 1]
+      if (snap.size < pageSize)
+        break
+    }
+
+    logger.log('publishScheduledPosts complete', {
+      scanned,
+      withSchedule,
+      published,
+      skipped,
+      unscheduled,
+      nowIso,
+    })
+  },
+)
 
 exports.onSiteWritten = createKvMirrorHandler({
   document: 'organizations/{orgId}/published-site-settings/{siteId}',
