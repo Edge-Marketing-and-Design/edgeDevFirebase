@@ -50,6 +50,8 @@ import {
   browserPopupRedirectResolver,
   signInWithPopup,
   sendSignInLinkToEmail,
+  signInWithEmailLink as firebaseSignInWithEmailLink,
+  isSignInWithEmailLink,
   verifyBeforeUpdateEmail,
   signInWithCustomToken,
   updateProfile,
@@ -208,6 +210,7 @@ interface Meta {
 }
 
 const DEFAULT_FUNCTIONS_REGION = "us-central1";
+const EMAIL_LINK_STORAGE_KEY = "edgeFirebase.emailLinkSignInEmail";
 
 export const EdgeFirebase = class {
   constructor(
@@ -279,6 +282,90 @@ export const EdgeFirebase = class {
   private anaytics = null;
 
   private functions = null;
+
+  private setEmailLinkContext = (email: string): void => {
+    if (typeof window === "undefined" || !window.localStorage || !email) return;
+    window.localStorage.setItem(EMAIL_LINK_STORAGE_KEY, email);
+  };
+
+  private getEmailLinkContext = (): string | null => {
+    if (typeof window === "undefined" || !window.localStorage) return null;
+    return window.localStorage.getItem(EMAIL_LINK_STORAGE_KEY);
+  };
+
+  private clearEmailLinkContext = (): void => {
+    if (typeof window === "undefined" || !window.localStorage) return;
+    window.localStorage.removeItem(EMAIL_LINK_STORAGE_KEY);
+  };
+
+  private mapEmailLinkError = (error: any): { code: string; message: string; firebaseCode: string } => {
+    const firebaseCode = error?.code || "unknown";
+    switch (firebaseCode) {
+      case "auth/invalid-action-code":
+        return {
+          code: "email-link/invalid-or-used",
+          firebaseCode,
+          message: "This email sign-in link is invalid, expired, or already used. Request a new link and try again."
+        };
+      case "auth/expired-action-code":
+        return {
+          code: "email-link/expired",
+          firebaseCode,
+          message: "This email sign-in link has expired. Request a new link and try again."
+        };
+      case "auth/invalid-email":
+      case "auth/user-mismatch":
+      case "auth/email-already-in-use":
+        return {
+          code: "email-link/account-mismatch",
+          firebaseCode,
+          message: "This sign-in link does not match the selected account email. Use the original email or request a new link."
+        };
+      default:
+        return {
+          code: firebaseCode,
+          firebaseCode,
+          message: error?.message || "Unable to complete email-link sign-in."
+        };
+    }
+  };
+
+  private completeEmailLinkSignIn = async (
+    email?: string,
+    emailLink?: string
+  ): Promise<{ credential?: any; error?: { code: string; firebaseCode: string; message: string } }> => {
+    const resolvedLink =
+      emailLink || (typeof window !== "undefined" ? window.location.href : "");
+    const resolvedEmail = email || this.getEmailLinkContext();
+
+    if (!resolvedLink || !isSignInWithEmailLink(this.auth, resolvedLink)) {
+      return {
+        error: {
+          code: "email-link/invalid-or-used",
+          firebaseCode: "auth/invalid-action-code",
+          message: "This email sign-in link is invalid, expired, or already used. Request a new link and try again."
+        }
+      };
+    }
+
+    if (!resolvedEmail) {
+      return {
+        error: {
+          code: "email-link/missing-email-context",
+          firebaseCode: "auth/missing-email-context",
+          message: "Email context is missing for this sign-in link. Enter your email again and request a new link."
+        }
+      };
+    }
+
+    try {
+      const credential = await firebaseSignInWithEmailLink(this.auth, resolvedEmail, resolvedLink);
+      this.clearEmailLinkContext();
+      return { credential };
+    } catch (error) {
+      return { error: this.mapEmailLinkError(error) };
+    }
+  };
 
   public runFunction = async (functionName: string, data: Record<string, unknown>) => {
     data.uid = this.user.uid;
@@ -553,12 +640,13 @@ export const EdgeFirebase = class {
     }
   }
 
-  public sendEmailLink = async (email: string): Promise<any> => {
+  public sendEmailLink = async (email: string, continueUrl?: string): Promise<any> => {
     const actionCodeSettings = {
-      url: window.location.href,
+      url: continueUrl || window.location.href,
       handleCodeInApp: true,
     };
     try {
+      this.setEmailLinkContext(email);
       await sendSignInLinkToEmail(this.auth, email, actionCodeSettings);
       return true;
     } catch (error) {
@@ -567,6 +655,30 @@ export const EdgeFirebase = class {
       this.logOut();
       return false;
     }
+  };
+
+  public signInWithEmailLink = async (
+    email?: string,
+    emailLink?: string
+  ): Promise<actionResponse> => {
+    const result = await this.completeEmailLinkSignIn(email, emailLink);
+    if (result.error) {
+      return this.sendResponse({
+        success: false,
+        message: result.error.message,
+        meta: {
+          code: result.error.code,
+          firebaseCode: result.error.firebaseCode
+        }
+      });
+    }
+    return this.sendResponse({
+      success: true,
+      message: "Email-link sign-in completed.",
+      meta: {
+        uid: result.credential.user.uid
+      }
+    });
   };
 
   public sendPhoneCode = async (phone: string): Promise<any> => {
@@ -657,6 +769,36 @@ export const EdgeFirebase = class {
     if (userSnap.exists()) {
       const user = userSnap.data();
       if (user.userId) {
+        if (authProvider === "emailLink") {
+          const emailLinkResult = await this.completeEmailLinkSignIn(userRegister.email);
+          if (emailLinkResult.error) {
+            return this.sendResponse({
+              success: false,
+              message: emailLinkResult.error.message,
+              meta: {
+                code: emailLinkResult.error.code,
+                firebaseCode: emailLinkResult.error.firebaseCode
+              }
+            });
+          }
+          if (emailLinkResult.credential.user.uid !== user.userId) {
+            return this.sendResponse({
+              success: false,
+              message: "This sign-in link does not match the already-registered account for this registration code.",
+              meta: {
+                code: "email-link/account-mismatch",
+                firebaseCode: "auth/user-mismatch"
+              }
+            });
+          }
+          return this.sendResponse({
+            success: true,
+            message: "User already registered. Signed in successfully.",
+            meta: {
+              uid: emailLinkResult.credential.user.uid
+            }
+          });
+        }
         return this.sendResponse({
           success: false,
           message: "User already registered",
@@ -728,13 +870,26 @@ export const EdgeFirebase = class {
             response = error;
           }
         } else if (authProvider === "emailLink") {
-          // TOOD: emailLink stuff
+          const emailLinkResult = await this.completeEmailLinkSignIn(userRegister.email);
+          if (emailLinkResult.error) {
+            response = {
+              code: emailLinkResult.error.code,
+              firebaseCode: emailLinkResult.error.firebaseCode,
+              message: emailLinkResult.error.message
+            };
+          } else {
+            response = emailLinkResult.credential;
+          }
         }
-        if (!Object.prototype.hasOwnProperty.call(response, "user")) { 
+        if (!response || !Object.prototype.hasOwnProperty.call(response, "user")) { 
+          const message = response?.message || "Registration failed.";
+          const meta: Record<string, string> = {};
+          if (response?.code) meta.code = response.code;
+          if (response?.firebaseCode) meta.firebaseCode = response.firebaseCode;
           return this.sendResponse({
             success: false,
-            message: response,
-            meta: {}
+            message,
+            meta
           });
         }
         
