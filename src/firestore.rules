@@ -331,6 +331,13 @@ service cloud.firestore {
                   allow create: if request.auth.uid == request.resource.data.uid && checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "write");
                   allow update: if request.auth.uid == request.resource.data.uid && checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "write");
                   allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6, "delete");
+                  match /{seg8} {
+                    allow get: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7 + "-" + seg8, "read");
+                    allow list: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "read");
+                    allow create: if request.auth.uid == request.resource.data.uid && checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "write");
+                    allow update: if request.auth.uid == request.resource.data.uid && checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7 + "-" + seg8, "write");
+                    allow delete: if checkPermission(seg1 + "-" + seg2 + "-" + seg3 + "-" + seg4 + "-" + seg5 + "-" + seg6 + "-" + seg7, "delete");
+                  }
                 }
               }
             }

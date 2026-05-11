@@ -334,6 +334,15 @@ export const EdgeFirebase = class {
     email?: string,
     emailLink?: string
   ): Promise<{ credential?: any; error?: { code: string; firebaseCode: string; message: string } }> => {
+    // If sign-in already completed elsewhere in app flow, reuse current auth user.
+    if (this.auth?.currentUser) {
+      return {
+        credential: {
+          user: this.auth.currentUser
+        }
+      };
+    }
+
     const resolvedLink =
       emailLink || (typeof window !== "undefined" ? window.location.href : "");
     const resolvedEmail = email || this.getEmailLinkContext();
@@ -890,6 +899,18 @@ export const EdgeFirebase = class {
             success: false,
             message,
             meta
+          });
+        }
+
+        const existingUserRef = doc(this.db, "users", response.user.uid);
+        const existingUserSnap = await getDoc(existingUserRef);
+        if (existingUserSnap.exists()) {
+          return this.sendResponse({
+            success: false,
+            message: "This sign-in account is already linked to another registration. Sign in to your existing account and use the existing-user registration option for additional invitations.",
+            meta: {
+              code: "account-already-registered"
+            }
           });
         }
         
