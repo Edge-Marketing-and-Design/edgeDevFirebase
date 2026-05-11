@@ -104,12 +104,6 @@ fi
 cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
 cp ./src/config.js "$project_root/functions/config.js"
 
-if [ ! -d "$project_root/functions/kv" ]; then
-  mkdir -p "$project_root/functions/kv"
-fi
-
-cp ./src/kv/*.js "$project_root/functions/kv/"
-
 if [ ! -f "$project_root/functions/index.js" ]; then
   cp ./src/index.js "$project_root/functions/index.js"
 else
