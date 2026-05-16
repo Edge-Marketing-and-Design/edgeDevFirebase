@@ -1,8 +1,4 @@
-const AWS = require('aws-sdk')
-const FormData = require('form-data')
-const fetch = require('node-fetch')
-
-const { onCall, HttpsError, logger, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectFinalized, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const { onCall, HttpsError, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectDeleted, onDocumentDeleted } = require('./config.js')
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
 const systemNumber = process.env.TWILIO_SYSTEM_NUMBER
@@ -59,46 +55,19 @@ exports.addUpdateFileDoc = onCall(async (request) => {
   return { docId }
 })
 
-const deleteR2File = async (filePath) => {
-  const r2 = new AWS.S3({
-    endpoint: process.env.CLOUDFLARE_R2_ENDPOINT, // e.g., "https://<account-id>.r2.cloudflarestorage.com"
-    accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
-    region: 'auto', // Cloudflare R2 uses "auto" for region
-  })
-  const params = {
-    Bucket: 'files',
-    Key: filePath,
-  }
-  try {
-    await r2.deleteObject(params).promise()
-    console.log(`File deleted from Cloudflare R2: ${filePath}`)
-  }
-  catch (error) {
-    console.error('Error deleting file from Cloudflare R2:', error)
-  }
-}
-
 exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUCKET_REGION }, async (event) => {
   const docId = event.data.metadata?.fileDocId
-  const toR2 = event.data.metadata?.toR2
-  const cloudflareImageId = event.data.metadata?.cloudflareImageId
-  const cloudflareVideoId = event.data.metadata?.cloudflareVideoId
-  const r2ProcessCompleted = event.data.metadata?.r2ProcessCompleted
-  if (cloudflareImageId) {
-    await deleteCloudflareImage(cloudflareImageId)
-  }
-  if (cloudflareVideoId) {
-    await deleteCloudflareVideo(cloudflareVideoId)
-  }
-  if (toR2) {
-    if (r2ProcessCompleted === 'true') {
-      await deleteR2File(event.data.metadata?.r2FilePath)
-    }
-    else {
+  const fileBucket = event.data.bucket
+  const filePath = event.data.name
+
+  if (fileBucket && filePath) {
+    const [replacementExists] = await admin.storage().bucket(fileBucket).file(filePath).exists()
+    if (replacementExists) {
+      console.log('Skipping stale file delete cleanup because a replacement object already exists:', filePath)
       return
     }
   }
+
   if (docId) {
     const orgId = event.data.metadata?.orgId
     const docRef = db.collection(`organizations/${orgId}/files`).doc(docId)
@@ -112,154 +81,6 @@ exports.fileDeleted = onObjectDeleted({ region: process.env.FIREBASE_STORAGE_BUC
     }
   }
 })
-
-exports.toR2 = onObjectFinalized(
-  {
-    bucket: process.env.FIREBASE_STORAGE_BUCKET,
-    region: process.env.FIREBASE_STORAGE_BUCKET_REGION,
-    memory: '2GiB',
-    cpu: 2,
-    timeoutSeconds: 540,
-  }, async (event) => {
-    const toR2 = event.data.metadata?.toR2
-    if (toR2) {
-      const r2 = new AWS.S3({
-        endpoint: process.env.CLOUDFLARE_R2_ENDPOINT, // e.g., "https://<account-id>.r2.cloudflarestorage.com"
-        accessKeyId: process.env.CLOUDFLARE_R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.CLOUDFLARE_R2_SECRET_ACCESS_KEY,
-        region: 'auto', // Cloudflare R2 uses "auto" for region
-      })
-      const fileBucket = event.data.bucket // Storage bucket containing the file.
-      const filePath = event.data.name // File path in the bucket.
-      const r2FilePath = `${process.env.FIREBASE_STORAGE_BUCKET}/${event.data.metadata?.filePath}`
-      const r2URL = `${process.env.CLOUDFLARE_R2_PUBLIC_URL}/${r2FilePath}`
-      const fileName = event.data.metadata?.fileName // File name.
-      const fileSize = event.data.metadata?.fileSize
-      const contentType = event.data.contentType // File content type.
-
-      // Download file into memory from bucket.
-      const bucket = admin.storage().bucket(fileBucket)
-
-      const fileStream = bucket.file(filePath).createReadStream()
-
-      // const downloadResponse = await bucket.file(filePath).download()
-      // const file = downloadResponse[0]
-
-      // Upload the file to Cloudflare R2.
-      const params = {
-        Bucket: 'files',
-        Key: r2FilePath,
-        Body: fileStream,
-        ContentType: contentType,
-      }
-      const fileRef = bucket.file(filePath)
-      try {
-        await r2.upload(params).promise()
-
-        const fileDocId = event.data.metadata?.fileDocId
-        const orgId = event.data.metadata?.orgId
-        const docRef = db.collection(`organizations/${orgId}/files`).doc(fileDocId)
-        await docRef.set({ r2FilePath, r2URL, uploadCompletedToR2: true }, { merge: true })
-
-        // const base64Image = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/wcAAgAB/ax3OTkAAAAASUVORK5CYII='
-        // const imageBuffer = Buffer.from(base64Image, 'base64')
-
-        // await fileRef.save(imageBuffer, {
-        //   contentType: 'image/png',
-        // })
-
-        const blankBuffer = Buffer.from('')
-        await fileRef.save(blankBuffer, {
-          contentType: 'application/octet-stream',
-        })
-
-        // Step 2: Update metadata with additional fields
-        let updatedMetadata = {
-          metadata: {
-            ...event.data.metadata,
-            r2FilePath,
-            r2URL,
-            uploadCompletedToR2: 'true', // Add custom metadata after file save
-            r2ProcessCompleted: 'true',
-          },
-        }
-        if (contentType.startsWith('image/') && process.env.CF_IMAGES_TOKEN) {
-          try {
-            const cloudflareImage = await uploadToCloudflareImage({
-              r2FilePath,
-              r2URL,
-              fileDocId,
-              orgId,
-              fileName,
-              fileSize,
-            })
-
-            updatedMetadata = {
-              metadata: {
-                ...event.data.metadata,
-                r2FilePath,
-                r2URL,
-                uploadCompletedToR2: 'true', // Add custom metadata after file save
-                r2ProcessCompleted: 'true',
-                cloudflareImageId: cloudflareImage.id,
-                cloudflareImageVariants: cloudflareImage.variants,
-                cloudflareUploadCompleted: true,
-              },
-            }
-            await docRef.set({ cloudflareImageId: cloudflareImage.id, cloudflareImageVariants: cloudflareImage.variants, cloudflareUploadCompleted: true }, { merge: true })
-          }
-          catch (e) {
-            console.error('Cloudflare Image Upload Failed', e)
-          }
-        }
-
-        if (contentType.startsWith('video/') && process.env.CF_IMAGES_TOKEN) {
-          try {
-            const cloudflareVideo = await uploadToCloudflareVideo({
-              r2FilePath,
-              r2URL,
-              fileDocId,
-              orgId,
-              fileName,
-              fileSize,
-            })
-            console.log(cloudflareVideo)
-            updatedMetadata = {
-              metadata: {
-                ...event.data.metadata,
-                r2FilePath,
-                r2URL,
-                uploadCompletedToR2: 'true', // Add custom metadata after file save
-                r2ProcessCompleted: 'true',
-                cloudflareVideoId: cloudflareVideo.id,
-                cloudflareVideoPlayback: cloudflareVideo.playback,
-                cloudflareVideoThumbnail: cloudflareVideo.thumbnail,
-                cloudflareVideoPreview: cloudflareVideo.preview,
-                cloudflareUploadCompleted: true,
-              },
-            }
-            await docRef.set({ cloudflareVideoId: cloudflareVideo.id, cloudflareVideoPlayback: cloudflareVideo.playback, cloudflareVideoThumbnail: cloudflareVideo.thumbnail, cloudflareVideoPreview: cloudflareVideo.preview, cloudflareUploadCompleted: true }, { merge: true })
-          }
-          catch (e) {
-            console.error('Cloudflare Video Upload Failed', e)
-          }
-        }
-        await fileRef.setMetadata(updatedMetadata)
-        console.log(`File uploaded to Cloudflare R2: ${fileName}`)
-      }
-      catch (error) {
-        const updatedMetadata = {
-          metadata: {
-            ...event.data.metadata,
-            uploadCompletedToR2: 'false',
-            r2ProcessCompleted: 'true',
-          },
-        }
-        await fileRef.setMetadata(updatedMetadata)
-        console.error('Error uploading file to Cloudflare R2:', error)
-      }
-    }
-  })
 
 exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 180 }, async (event) => {
   const queuedTopicsRef = db.collection('topic-queue')
@@ -693,148 +514,4 @@ function markProcessed(eventRef) {
   return eventRef.set({ processed: true }).then(() => {
     return null
   })
-}
-
-async function uploadToCloudflareImage({ r2FilePath, r2URL, fileDocId, orgId, fileName, fileSize }) {
-  const cleanedr2FilePath = r2FilePath.replaceAll('/', '-').replace('.firebasestorage.app-organizations', '')
-  const metadata = {
-    orgId,
-    fileDocId,
-    fileName: cleanedr2FilePath,
-    fileSize,
-  }
-
-  const API_TOKEN = process.env.CF_IMAGES_TOKEN
-  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
-
-  const formData = new FormData()
-  formData.append('url', r2URL)
-  formData.append('metadata', JSON.stringify(metadata))
-  formData.append('id', cleanedr2FilePath)
-
-  const response = await fetch(
-  `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/images/v1`,
-  {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${API_TOKEN}`,
-      ...formData.getHeaders(),
-    },
-    body: formData,
-  },
-  )
-
-  const result = await response.json()
-
-  const { result: imageData, success, errors } = result
-
-  if (!success) {
-    const errorMessages = (errors || [])
-      .map(error => (error.message ? error.message : 'Unknown error'))
-      .join('; ')
-    throw new Error(`Cloudflare upload failed: ${errorMessages}`)
-  }
-
-  return {
-    id: imageData.id,
-    variants: imageData.variants,
-    meta: imageData.meta || {},
-  }
-}
-
-async function deleteCloudflareImage(imageId) {
-  const API_TOKEN = process.env.CF_IMAGES_TOKEN
-  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
-
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/images/v1/${imageId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-      },
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete Cloudflare image: ${response.statusText}`)
-  }
-
-  return true
-}
-
-async function uploadToCloudflareVideo({ r2FilePath, r2URL, fileDocId, orgId, fileSize }) {
-  const API_TOKEN = process.env.CF_IMAGES_TOKEN
-  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
-
-  const cleanedr2FilePath = r2FilePath
-    .replaceAll('/', '-')
-    .replace('.firebasestorage.app-organizations', '')
-
-  const metadata = {
-    orgId,
-    fileDocId,
-    fileName: cleanedr2FilePath,
-    fileSize,
-  }
-
-  const body = {
-    url: r2URL,
-    meta: {
-      name: cleanedr2FilePath,
-      ...metadata,
-    },
-    allowDownloads: true,
-  }
-
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stream/copy`,
-    {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${API_TOKEN}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(body),
-    },
-  )
-
-  const result = await response.json()
-
-  if (!result.success) {
-    const errorMessages = (result.errors || [])
-      .map(error => error.message || 'Unknown error')
-      .join('; ')
-    throw new Error(`Cloudflare Stream upload failed: ${errorMessages}`)
-  }
-  console.log(result.result)
-  const { uid, preview, playback, thumbnail } = result.result
-
-  return {
-    id: uid,
-    preview,
-    playback,
-    thumbnail,
-  }
-}
-
-async function deleteCloudflareVideo(videoId) {
-  const API_TOKEN = process.env.CF_IMAGES_TOKEN
-  const ACCOUNT_ID = process.env.CF_ACCOUNT_ID
-
-  const response = await fetch(
-    `https://api.cloudflare.com/client/v4/accounts/${ACCOUNT_ID}/stream/${videoId}`,
-    {
-      method: 'DELETE',
-      headers: {
-        Authorization: `Bearer ${API_TOKEN}`,
-      },
-    },
-  )
-
-  if (!response.ok) {
-    throw new Error(`Failed to delete Cloudflare video: ${response.statusText}`)
-  }
-
-  return true
 }
