@@ -609,6 +609,7 @@ export const EdgeFirebase = class {
 
   private signInWithMicrosoft = async (providerScopes: string[] = []): Promise<any> => {
     const provider = new OAuthProvider("microsoft.com");
+    provider.setCustomParameters({ prompt: "select_account" });
     for (const scope of providerScopes) {
       provider.addScope(scope);
     }
