@@ -1,5 +1,7 @@
 import { initializeApp } from "firebase/app";
-import { reactive } from "vue";
+import { reactive, type App } from "vue";
+import { BrowserErrorReporter, getBrowserErrorReporter } from "./errorReporting";
+import type { EdgeErrorReportingOptions } from "./errorReporting";
 import {
   getFirestore,
   collection,
@@ -187,6 +189,7 @@ interface firebaseConfig {
   emulatorFunctions?: string;
   emulatorStorage?: string;
   functionsRegion?: string;
+  errorReporting?: false | EdgeErrorReportingOptions;
 }
 
 interface actionResponse {
@@ -231,8 +234,13 @@ export const EdgeFirebase = class {
     isPersistant: false,
     enablePopupRedirect: false,
   ) {
-    this.firebaseConfig = firebaseConfig;
+    const { errorReporting, ...firebaseOptions } = firebaseConfig;
+    this.firebaseConfig = firebaseOptions;
     this.app = initializeApp(this.firebaseConfig);
+    this.errorReporter = getBrowserErrorReporter({
+      projectId: this.firebaseConfig.projectId,
+      ...(errorReporting === false ? { enabled: false } : errorReporting || {}),
+    });
     let persistence: Persistence = browserSessionPersistence;
     if (isPersistant) {
       persistence = browserLocalPersistence;
@@ -282,6 +290,11 @@ export const EdgeFirebase = class {
   private anaytics = null;
 
   private functions = null;
+  private errorReporter: BrowserErrorReporter | null = null;
+
+  public installErrorReporting = (app: App): void => {
+    this.errorReporter?.attachVueApp(app);
+  };
 
   private setEmailLinkContext = (email: string): void => {
     if (typeof window === "undefined" || !window.localStorage || !email) return;
@@ -379,7 +392,12 @@ export const EdgeFirebase = class {
   public runFunction = async (functionName: string, data: Record<string, unknown>) => {
     data.uid = this.user.uid;
     const callable = httpsCallable(this.functions, functionName);
-    return await callable(data);
+    try {
+      return await callable(data);
+    } catch (error) {
+      this.errorReporter?.captureCallableError(functionName, error);
+      throw error;
+    }
   };
 
   public updateEmail = async (newEmail: string): Promise<actionResponse> => {

@@ -10,6 +10,7 @@ A Vue 3 / Nuxt 3 Plugin or Nuxt 3 global composable for Firebase authentication 
 **[Firestore Snapshot Listeners](#firestore-snapshot-listeners)**  
 **[Firestore Static Collection Data](#firestore-static-collection-data)**  
 **[Run a Cloud Function](#run-a-cloud-function)**  
+**[Edge Monitor Error Reporting](#edge-monitor-error-reporting)**
 **[Await and response](#responses)**  
 **[Firestore Rules](#firestore-rules)**
 
@@ -111,6 +112,57 @@ import { inject } from "vue";
 const edgeFirebase = inject("edgeFirebase");
 </script>
 ```
+
+# Edge Monitor Error Reporting
+
+Browser error reporting is disabled by default. Enable it per project by
+passing `errorReporting.enabled: true` when creating `EdgeFirebase`. The project
+must first be registered in Edge Monitor with every hostname that is allowed to
+report. The package then requests a short-lived installation token directly from
+Edge Monitor; no monitor secret is shipped to the browser.
+
+The browser reporter captures uncaught JavaScript errors, unhandled promise
+rejections, failed script/image/style resources, Vue errors when the package is
+installed with `app.use()`, `console.error`, a capped sample of
+`console.warn`, and failed `runFunction()` calls. It never sends cookies, auth
+tokens, form values, local storage, callable arguments, DOM text, or arbitrary
+console objects. Page and resource URLs are reported without query strings or
+hash fragments.
+
+Reporting can also be pointed at a local Edge Monitor Worker:
+
+```typescript
+const edgeFirebase = new EdgeFirebase({
+  ...config,
+  errorReporting: {
+    enabled: true,
+    monitorUrl: "http://localhost:8787",
+    captureConsoleWarnings: false,
+  },
+}, true)
+```
+
+Firebase Function errors are captured automatically for handlers created from
+the trigger factories exported by the package-installed `functions/config.js`,
+including callable, HTTP, Firestore, Pub/Sub, scheduler, and Storage triggers.
+The original error is always rethrown so Firebase retry and failure semantics
+do not change.
+
+Add the project-specific key returned by Edge Monitor to the deployed
+Functions environment:
+
+```dotenv
+EDGE_ERROR_REPORTING=true
+EDGE_ERROR_INGEST_KEY=project-specific-key-from-edge-monitor
+EDGE_ERROR_ENVIRONMENT=production
+EDGE_RELEASE=
+```
+
+`EDGE_ERROR_INGEST_KEY` is server-only. Never add it to a Nuxt/Vite public
+environment variable. Function reports contain only the project, function,
+trigger, region, stable event ID when Firebase supplies one, and sanitized
+error name/code/message/stack. Firestore documents, Pub/Sub messages, HTTP
+bodies, callable data, and authentication context are not included.
 
 ### Firebase Trigger functions.
 
@@ -875,7 +927,9 @@ This function allows you to invoke a specified cloud function by providing its n
 
 #### Returns
 
-A Promise that resolves to the result of the invoked cloud function.
+A Promise that resolves to the result of the invoked cloud function. Rejected
+callable requests are reported to Edge Monitor as client-side errors and then
+rethrown unchanged.
 
 #### Example
 
