@@ -104,6 +104,7 @@ fi
 cp ./src/edgeFirebase.js "$project_root/functions/edgeFirebase.js"
 cp ./src/config.js "$project_root/functions/config.js"
 cp ./src/errorReporting.js "$project_root/functions/errorReporting.js"
+cp ./src/permissionCheck.js "$project_root/functions/permissionCheck.js"
 
 if [ ! -f "$project_root/functions/index.js" ]; then
   cp ./src/index.js "$project_root/functions/index.js"
