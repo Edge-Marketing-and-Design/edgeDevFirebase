@@ -24,6 +24,43 @@ Install using pnpm:
 pnpm install @edgedev/firebase
 ```
 
+### KV ownership and rollout
+
+Shared Edge supplies the consumer's `functions/kv/` implementation. This package
+stopped copying those files in May 2026 and no longer bundles its obsolete
+`src/kv/` copies. Installing this package does not create, update, or delete the
+consumer's KV files; provision them through the Edge update workflow before
+loading or deploying Functions, including on a fresh installation.
+
+Both Firebase index templates no longer require or export `kvMirrorRetryWorker`.
+On upgrade, postinstall replaces the Firebase-managed marker block, removing its
+legacy registration while preserving the separate `EXTRA EDGE functions` block.
+Edge now owns both the implementation and function registration.
+
+Update Edge in each consumer **before installing this cleaned package**. The
+Edge migration must put the unchanged flat export inside its managed block in
+the consumer's `functions/index.js`:
+
+```javascript
+// START EXTRA EDGE functions
+exports.kvMirrorRetryWorker = require('./kv/kvRetryWorker').kvMirrorRetryWorker
+// END EXTRA EDGE functions
+```
+
+The Edge update workflow must also remove the known legacy KV registration lines
+only inside the Firebase-managed block and re-merge the Edge block after package
+installation, so older Firebase packages cannot restore duplicate registrations.
+Keep the deployed function name and trigger settings unchanged. Verify each
+consumer has both the Edge KV files and Edge registration before deploying.
+Installing this package before that migration removes the legacy export without
+providing a replacement.
+
+Before releasing this cleanup, run `npm test`, verify package contents exclude
+`src/kv/`, and confirm target consumers have received the Edge migration. The
+package version is `26.9.1`. Publishing, consumer updates, and deployment
+are separate steps; the shared KV retry payload fix belongs in Edge and is not
+included here.
+
 ### Installing with Nuxt 3 global composables
 
 Add a file (e.g., whatever.ts) to your "composables" folder with this code:
