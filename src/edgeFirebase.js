@@ -1,4 +1,9 @@
 const { onCall, HttpsError, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const { createLoginAuditHandlers } = require('./loginAudit')
+const loginAudit = createLoginAuditHandlers({ db, HttpsError })
+exports.recordLoginAttempt = onCall({ maxInstances: 5 }, loginAudit.record)
+exports.getLoginLog = onCall(loginAudit.list)
+
 const authToken = process.env.TWILIO_AUTH_TOKEN
 const accountSid = process.env.TWILIO_SID
 const systemNumber = process.env.TWILIO_SYSTEM_NUMBER

@@ -1,3 +1,4 @@
+import { createLoginAttempt, LoginMethod } from "./loginAudit";
 import { initializeApp } from "firebase/app";
 import { reactive, type App } from "vue";
 import { BrowserErrorReporter, getBrowserErrorReporter } from "./errorReporting";
@@ -291,6 +292,24 @@ export const EdgeFirebase = class {
 
   private functions = null;
   private errorReporter: BrowserErrorReporter | null = null;
+  private loginAttempt: ReturnType<typeof createLoginAttempt> | null = null;
+
+  private beginLoginAttempt = (method: LoginMethod, identifier = '') => {
+    const attempt = createLoginAttempt(async data => {
+      // Never send local Auth activity to production Functions accidentally.
+      if (this.firebaseConfig.emulatorAuth && !this.firebaseConfig.emulatorFunctions) return;
+      const callable = httpsCallable(this.functions, 'edgeFirebase-recordLoginAttempt', { timeout: 5000 });
+      await callable(data);
+    }, method, identifier, typeof window === 'undefined' ? '' : window.location.origin);
+    this.loginAttempt = attempt;
+    return attempt;
+  };
+
+  public getLoginLog = async (attemptedIdentifier = '') => {
+    const callable = httpsCallable(this.functions, 'edgeFirebase-getLoginLog');
+    return (await callable({ attemptedIdentifier })).data;
+  };
+
 
   public installErrorReporting = (app: App): void => {
     this.errorReporter?.attachVueApp(app);
@@ -360,7 +379,9 @@ export const EdgeFirebase = class {
       emailLink || (typeof window !== "undefined" ? window.location.href : "");
     const resolvedEmail = email || this.getEmailLinkContext();
 
+    const attempt = this.beginLoginAttempt('email-link', resolvedEmail || '');
     if (!resolvedLink || !isSignInWithEmailLink(this.auth, resolvedLink)) {
+      attempt.authentication('failed', 'auth/invalid-action-code');
       return {
         error: {
           code: "email-link/invalid-or-used",
@@ -371,6 +392,7 @@ export const EdgeFirebase = class {
     }
 
     if (!resolvedEmail) {
+      attempt.authentication('failed', 'auth/missing-email-context');
       return {
         error: {
           code: "email-link/missing-email-context",
@@ -382,9 +404,11 @@ export const EdgeFirebase = class {
 
     try {
       const credential = await firebaseSignInWithEmailLink(this.auth, resolvedEmail, resolvedLink);
+      attempt.authentication('success');
       this.clearEmailLinkContext();
       return { credential };
     } catch (error) {
+      attempt.authentication('failed', error.code);
       return { error: this.mapEmailLinkError(error) };
     }
   };
@@ -493,8 +517,15 @@ export const EdgeFirebase = class {
   private startUserMetaSync = async (docSnap): Promise<void> => {
     // Took this out because if another client is logged in, it breaks the other client
     // await this.ruleHelperReset();
-    await this.initUserMetaPermissions(docSnap);
+    const attempt = this.loginAttempt;
+    try {
+      await this.initUserMetaPermissions(docSnap);
+    } catch (error) {
+      attempt?.access('failed', 'app/profile-read-failed');
+      throw error;
+    }
     if (this.user.roles.length > 0 || this.user.specialPermissions.length > 0) {
+    attempt?.access('success');
     this.user.loggedIn = true;
     this.user.loggingIn = false;
     } else {
@@ -502,16 +533,25 @@ export const EdgeFirebase = class {
       this.user.loggingIn = false;
       this.user.logInError = true;
       this.user.logInErrorMessage = "You do not have permission to access this application. Please contact your administrator.";
+      attempt?.access('failed', 'app/no-permissions');
     }
   };
 
   private waitForUser = async(): Promise<void> => {
     //On registration may take a second for user to be created
+    const attempt = this.loginAttempt;
     const docRef = doc(this.db, "users", this.user.uid);
-    const docSnap = await getDoc(docRef);
+    let docSnap;
+    try {
+      docSnap = await getDoc(docRef);
+    } catch (error) {
+      attempt?.access('failed', 'app/profile-read-failed');
+      throw error;
+    }
     if (docSnap.exists()) {
       this.startUserMetaSync(docSnap);
     } else {
+      attempt?.access('failed', 'app/user-not-found');
       setTimeout(() => {
           this.waitForUser();
       }, 1000);
@@ -545,8 +585,12 @@ export const EdgeFirebase = class {
   };
 
   public loginWithCustomToken = async (token: string): Promise<void> => {
+    const attempt = this.beginLoginAttempt('custom-token');
+    let authenticated = false;
     try {
       const result = await signInWithCustomToken(this.auth, token);
+      authenticated = true;
+      attempt.authentication('success', '', result.user?.email || result.user?.phoneNumber || '');
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
         this.user.logInError = true;
         this.user.logInErrorMessage = JSON.stringify(result)
@@ -558,10 +602,13 @@ export const EdgeFirebase = class {
       if (!userSnap.exists()) { 
         this.user.logInError = true;
         this.user.logInErrorMessage = "User does not exist";
+        attempt.access('failed', 'app/user-not-found');
         this.logOut();
         return;
       }
     } catch (error) {
+      if (authenticated) attempt.access('failed', 'app/profile-read-failed');
+      else attempt.authentication('failed', error.code);
       this.user.logInError = true;
       this.user.logInErrorMessage = error.message;
       this.logOut();
@@ -570,10 +617,14 @@ export const EdgeFirebase = class {
   }
 
   public logInWithPhone = async (phoneNumber: string, phoneCode: string): Promise<void> => {
+    const attempt = this.beginLoginAttempt('phone', phoneNumber);
+    let authenticated = false;
     try {
       const verifyCode: any = await this.runFunction("edgeFirebase-verifyPhoneNumber", {phone: phoneNumber, code: phoneCode});
       if (verifyCode.data.success) {
         const result = await signInWithCustomToken(this.auth, verifyCode.data.token);
+        authenticated = true;
+        attempt.authentication('success');
         if (!Object.prototype.hasOwnProperty.call(result, "user")) {
           this.user.logInError = true;
           this.user.logInErrorMessage = JSON.stringify(result)
@@ -585,16 +636,20 @@ export const EdgeFirebase = class {
         if (!userSnap.exists()) { 
           this.user.logInError = true;
           this.user.logInErrorMessage = "User does not exist";
+          attempt.access('failed', 'app/user-not-found');
           this.logOut();
           return;
         }
       } else {
         this.user.logInError = true;
         this.user.logInErrorMessage = verifyCode.data.error;
+        attempt.authentication('failed', 'auth/invalid-verification-code');
         this.logOut();
         return;
       }
     } catch (error) {
+      if (authenticated) attempt.access('failed', 'app/profile-read-failed');
+      else attempt.authentication('failed', error.code);
       this.user.logInError = true;
       this.user.logInErrorMessage = error.message;
       this.logOut();
@@ -603,21 +658,32 @@ export const EdgeFirebase = class {
   };
 
   public logInWithMicrosoft = async (providerScopes: string[] = []): Promise<void> => {
+    const attempt = this.beginLoginAttempt('microsoft');
+    let authenticated = false;
+    try {
       const result = await this.signInWithMicrosoft(providerScopes);
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
+        attempt.authentication('failed', result.code);
         this.user.logInError = true;
-        this.user.logInErrorMessage = result
+        this.user.logInErrorMessage = result;
         this.logOut();
         return;
       }
-      console.log(result.user.uid);
+      authenticated = true;
+      attempt.authentication('success', '', result.user.email || '');
       const userRef = doc(this.db, "users", result.user.uid);
       const userSnap = await getDoc(userRef);
-      if (!userSnap.exists()) { 
+      if (!userSnap.exists()) {
+        attempt.access('failed', 'app/user-not-found');
         this.user.logInError = true;
         this.user.logInErrorMessage = "User does not exist";
         this.logOut();
       }
+    } catch (error) {
+      if (authenticated) attempt.access('failed', 'app/profile-read-failed');
+      else attempt.authentication('failed', error.code);
+      throw error;
+    }
   };
 
   private registerUserWithMicrosoft = async (providerScopes: string[] = []): Promise<any> => {
@@ -1533,6 +1599,7 @@ export const EdgeFirebase = class {
 
 
   public logIn = (credentials: Credentials): void => {
+    const attempt = this.beginLoginAttempt('password', credentials.email);
     this.logOut();
     signInWithEmailAndPassword(
       this.auth,
@@ -1540,9 +1607,10 @@ export const EdgeFirebase = class {
       credentials.password
     )
     .then(() => {
-     // Do nothing
+      attempt.authentication('success');
     })
     .catch((error) => {
+      attempt.authentication('failed', error.code);
       this.user.email = "";
       this.user.uid = null;
       this.user.firebaseUser = null;

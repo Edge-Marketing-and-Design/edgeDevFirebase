@@ -61,6 +61,14 @@ package version is `26.9.1`. Publishing, consumer updates, and deployment
 are separate steps; the shared KV retry payload fix belongs in Edge and is not
 included here.
 
+### Login audit log
+
+Explicit sign-in attempts can be audited in the root `login-log` collection,
+including attempted email/phone, safe error details, timestamps and application
+permission failures. Records expire after 60 days **once Firestore TTL is enabled**.
+See [login audit setup and querying](docs/login-audit.md) for the required function,
+rules, index and TTL rollout, root-admin access, and submission limits.
+
 ### Installing with Nuxt 3 global composables
 
 Add a file (e.g., whatever.ts) to your "composables" folder with this code:

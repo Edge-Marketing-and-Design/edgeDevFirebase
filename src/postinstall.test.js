@@ -74,6 +74,7 @@ test('fresh installation neither supplies nor registers KV', (t) => {
   }
   const consumer = fixture(t)
   consumer.install()
+  assert.equal(fs.readFileSync(path.join(consumer.functionsDir, 'loginAudit.js'), 'utf8'), fs.readFileSync(path.join(__dirname, 'loginAudit.js'), 'utf8'))
   assert.equal(fs.existsSync(path.join(consumer.functionsDir, 'kv')), false)
   consumer.verify({ hasEdgeRegistration: false, hasKVFiles: false })
 })

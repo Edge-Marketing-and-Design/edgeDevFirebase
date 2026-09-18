@@ -264,7 +264,8 @@ service cloud.firestore {
           let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
           let skipPaths = ["collection-data", "users", "staged-users", "events", "rule-helpers", "phone-auth", "public-users", "topic-queue"];
           let ruleHelper = get(/databases/$(database)/documents/rule-helpers/$(request.auth.uid)).data;
-          return !(collectionPath in skipPaths) &&
+          return !(seg1 in ["login-log", "login-log-limits"]) &&
+                 !(collectionPath in skipPaths) &&
                  !(permissionCheck == "write" && 
                     (
                       ("stripeCustomerId" in request.resource.data && (!("stripeCustomerId" in resource.data) || resource.data.stripeCustomerId != request.resource.data.stripeCustomerId)) ||
