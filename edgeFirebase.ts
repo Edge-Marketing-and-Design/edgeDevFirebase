@@ -663,7 +663,7 @@ export const EdgeFirebase = class {
     try {
       const result = await this.signInWithMicrosoft(providerScopes);
       if (!Object.prototype.hasOwnProperty.call(result, "user")) {
-        attempt.authentication('failed', result.code);
+        attempt.authentication('failed', result.code, typeof result.customData?.email === 'string' ? result.customData.email : '');
         this.user.logInError = true;
         this.user.logInErrorMessage = result;
         this.logOut();
@@ -681,7 +681,7 @@ export const EdgeFirebase = class {
       }
     } catch (error) {
       if (authenticated) attempt.access('failed', 'app/profile-read-failed');
-      else attempt.authentication('failed', error.code);
+      else attempt.authentication('failed', error.code, typeof error.customData?.email === 'string' ? error.customData.email : '');
       throw error;
     }
   };

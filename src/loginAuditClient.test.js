@@ -16,8 +16,9 @@ function load(file, dependencies) {
 }
 const { createLoginAttempt } = load('loginAudit.ts', {})
 const settle = () => new Promise(resolve => setImmediate(resolve))
-function client({ failure, emulatorAuth, rejectAudit = false, profileExists = true, profileFailure = false } = {}) {
+function client({ failure, emulatorAuth, rejectAudit = false, profileExists = true, profileFailure = false, onAudit } = {}) {
   const sent = []
+  const auditRequests = []
   const dependencies = {
     './loginAudit': { createLoginAttempt },
     './errorReporting': { getBrowserErrorReporter: () => ({ captureCallableError() { throw new Error('Unexpected Monitor call') } }) },
@@ -26,6 +27,11 @@ function client({ failure, emulatorAuth, rejectAudit = false, profileExists = tr
     'firebase/auth': {
       initializeAuth: () => ({}), onAuthStateChanged() {}, connectAuthEmulator() {},
       signOut: async () => {},
+      OAuthProvider: class {
+        setCustomParameters() {}
+        addScope() {}
+      },
+      signInWithPopup: async () => { throw failure },
       signInWithCustomToken: async () => { if (failure) throw failure; return { user: { uid: 'test', email: 'resolved@example.com' } } },
       isSignInWithEmailLink: () => true,
       signInWithEmailLink: async () => { if (failure) throw failure; return { user: { uid: 'test' } } },
@@ -40,12 +46,17 @@ function client({ failure, emulatorAuth, rejectAudit = false, profileExists = tr
       httpsCallable: (functions, name) => async payload => {
         sent.push({ name, payload })
         if (rejectAudit) throw new Error('offline')
+        if (onAudit && name === 'edgeFirebase-recordLoginAttempt') {
+          const request = onAudit(JSON.parse(JSON.stringify(payload)))
+          auditRequests.push(request)
+          return { data: await request }
+        }
         return { data: {} }
       },
     },
   }
   const { EdgeFirebase } = load('edgeFirebase.ts', dependencies)
-  return { instance: new EdgeFirebase({ projectId: 'demo-test', emulatorAuth }, false, false), sent }
+  return { instance: new EdgeFirebase({ projectId: 'demo-test', emulatorAuth }, false, false), sent, auditRequests }
 }
 
 test('password failure keeps UI error, reports attempted email, never sends password/error text to audit', async () => {
@@ -114,6 +125,8 @@ for (const method of ['microsoft', 'phone', 'custom-token', 'email-link']) {
     assert.equal(sent.length, 1)
     assert.equal(sent[0].payload.method, method)
     assert.equal(sent[0].payload.outcome, 'failed')
+    const expectedIdentifier = { microsoft: '', phone: '+15551234567', 'custom-token': '', 'email-link': 'typed@example.com' }
+    assert.equal(sent[0].payload.attemptedIdentifier, expectedIdentifier[method])
     assert.equal(JSON.stringify(sent).includes('private-'), false)
   })
 }
@@ -140,4 +153,75 @@ test('missing profile and application permission denial are audited', async () =
   await settle()
   assert.equal(sent.at(-1).payload.errorCode, 'app/no-permissions')
   assert.equal(instance.user.loggedIn, false)
+})
+
+
+test('Microsoft account conflict records the SDK email without OAuth credentials', async () => {
+  const failure = {
+    code: 'auth/account-exists-with-different-credential',
+    customData: {
+      email: 'Attempted@Example.com',
+      _tokenResponse: { oauthAccessToken: 'secret-access-token', oauthIdToken: 'secret-id-token' },
+    },
+  }
+  const { instance, sent } = client({ failure })
+  await instance.logInWithMicrosoft()
+  await settle()
+  assert.equal(sent.length, 1)
+  assert.equal(sent[0].payload.attemptedIdentifier, 'Attempted@Example.com')
+  assert.equal(sent[0].payload.errorCode, failure.code)
+  assert.equal(instance.user.logInError, true)
+  assert.equal(JSON.stringify(sent).includes('secret-'), false)
+  const { normalizeAttempt } = require('./loginAudit')
+  const stored = normalizeAttempt(sent[0].payload, {}, new Date())
+  assert.equal(stored.attemptedIdentifier, 'attempted@example.com')
+  assert.equal(stored.authenticatedUid, null)
+})
+
+for (const email of [undefined, { unexpected: 'value' }]) {
+  test(`Microsoft failure without a usable email remains blank (${typeof email})`, async () => {
+    const { instance, sent } = client({ failure: { code: 'auth/popup-closed-by-user', customData: { email } } })
+    await instance.logInWithMicrosoft()
+    await settle()
+    assert.equal(sent[0].payload.attemptedIdentifier, '')
+    assert.equal(instance.user.logInError, true)
+  })
+}
+
+
+test('Microsoft failure email survives client transport, collector transaction and Firestore readback', {
+  skip: !process.env.LOGIN_AUDIT_FIRESTORE_SDK,
+}, async () => {
+  assert.equal(process.env.FIRESTORE_EMULATOR_HOST, '127.0.0.1:18089')
+  const { Firestore } = require(process.env.LOGIN_AUDIT_FIRESTORE_SDK)
+  const db = new Firestore({ projectId: 'demo-login-audit' })
+  const { createLoginAuditHandlers } = require('./loginAudit')
+  const handler = createLoginAuditHandlers({ db, HttpsError: Error })
+  try {
+    const failure = {
+      code: 'auth/account-exists-with-different-credential',
+      customData: { email: 'Microsoft.Attempt@Example.com', _tokenResponse: { oauthAccessToken: 'do-not-store-token' } },
+    }
+    const { instance, auditRequests } = client({
+      failure,
+      onAudit: data => handler.record({ data, rawRequest: { ip: '127.0.0.1' } }),
+    })
+    await instance.logInWithMicrosoft()
+    await settle()
+    assert.equal(auditRequests.length, 1)
+    assert.deepEqual(await Promise.all(auditRequests), [{ recorded: true }])
+    const snapshot = await db.collection('login-log').where('attemptedIdentifier', '==', 'microsoft.attempt@example.com').get()
+    assert.equal(snapshot.size, 1)
+    const record = snapshot.docs[0].data()
+    assert.equal(record.method, 'microsoft')
+    assert.equal(record.errorCode, failure.code)
+    assert.equal(record.attemptedIdentifier, 'microsoft.attempt@example.com')
+    assert.equal(record.authenticatedUid, null)
+    assert.equal(record.outcome, 'failed')
+    assert.equal(record.expiresAt.toMillis() - record.createdAt.toMillis(), 60 * 86400000)
+    assert.equal(JSON.stringify(record).includes('do-not-store-token'), false)
+    console.log('Firestore emulator readback:', JSON.stringify({ attemptedIdentifier: record.attemptedIdentifier, method: record.method, errorCode: record.errorCode, outcome: record.outcome }))
+  } finally {
+    await db.terminate()
+  }
 })

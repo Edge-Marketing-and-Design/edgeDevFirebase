@@ -10,8 +10,10 @@ lowercased), method, stage, outcome, error code, safe error description, site or
 server creation time, and `expiresAt` 60 days later. The verified callable UID is
 stored separately as `authenticatedUid`; it can be null for failures. These are
 **client-reported support records**, not proof that a particular person attempted
-login. Microsoft popup failures and invalid custom tokens may have no identifier:
-the SDK does not always expose one, and tokens are never decoded for logging.
+login. Microsoft failures use the email provided in Firebase `error.customData.email`,
+including account conflicts (`auth/account-exists-with-different-credential`).
+Failures where the SDK provides no email (such as closing the popup) and invalid
+custom tokens can still have no identifier. Tokens are never decoded for logging.
 
 Passwords, custom tokens, verification codes, arbitrary error messages/stacks and
 URL paths/query parameters are not included. Unknown error codes receive a generic

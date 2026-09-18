@@ -57,7 +57,7 @@ providing a replacement.
 
 Before releasing this cleanup, run `npm test`, verify package contents exclude
 `src/kv/`, and confirm target consumers have received the Edge migration. The
-package version is `26.9.2`. Publishing, consumer updates, and deployment
+package version is `26.9.3`. Publishing, consumer updates, and deployment
 are separate steps; the shared KV retry payload fix belongs in Edge and is not
 included here.
 
