@@ -1,4 +1,5 @@
-const { onCall, HttpsError, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const { onCall, HttpsError, getFirestore, functions, admin, twilio, db, onSchedule, onDocumentCreated, onDocumentUpdated, onDocumentWritten, pubsub, Storage, permissionCheck, onObjectDeleted, onDocumentDeleted } = require('./config.js')
+const { authorizeStage, approvedInvitation, approvalRef } = require('./userSyncAuthorization')
 const { createLoginAuditHandlers } = require('./loginAudit')
 const loginAudit = createLoginAuditHandlers({ db, HttpsError })
 exports.recordLoginAttempt = onCall({ maxInstances: 5 }, loginAudit.record)
@@ -133,32 +134,32 @@ exports.topicQueue = onSchedule({ schedule: 'every 1 minutes', timeoutSeconds: 1
   }
 })
 
-exports.userSyncMetaToOrg = onDocumentWritten({ document: 'staged-users/{stagedId}', timeoutSeconds: 180 }, async (event) => {
+exports.userSyncMetaToOrg = onDocumentWritten({ document: 'users/{userId}', timeoutSeconds: 180 }, async (event) => {
   console.log('userSyncMetaToOrg triggered')
   const change = event.data
   const afterExists = change.after.exists
   const beforeData = change.before.data() || {}
   const afterData = afterExists ? change.after.data() : null
 
-  const beforeUniqueOrgs = beforeData.roles ? [...new Set(Object.values(beforeData.roles).map(role => role.collectionPath.split('-')[1]))] : []
-  const afterUniqueOrgs = (afterData && afterData.roles) ? [...new Set(Object.values(afterData.roles).map(role => role.collectionPath.split('-')[1]))] : []
+  const beforeUniqueOrgs = beforeData.roles ? [...new Set(Object.values(beforeData.roles).filter(role => role.collectionPath?.startsWith('organizations-')).map(role => role.collectionPath.split('-')[1]))] : []
+  const afterUniqueOrgs = (afterData && afterData.roles) ? [...new Set(Object.values(afterData.roles).filter(role => role.collectionPath?.startsWith('organizations-')).map(role => role.collectionPath.split('-')[1]))] : []
   if (!afterExists) {
     for (const orgId of beforeUniqueOrgs) {
       // delete user from org
-      const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
+      const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(beforeData.stagedDocId || change.before.id)
       await orgRef.delete()
     }
   }
   const orgsRemoved = beforeUniqueOrgs.filter(orgId => !afterUniqueOrgs.includes(orgId))
   for (const orgId of orgsRemoved) {
     // delete user from org
-    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
+    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(beforeData.stagedDocId || change.before.id)
     await orgRef.delete()
   }
   for (const orgId of afterUniqueOrgs) {
     // add user to org
-    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(change.before.id)
-    await orgRef.set({ ...afterData.meta, userId: afterData.userId, stagedDocId: change.before.id })
+    const orgRef = db.collection('organizations').doc(orgId).collection('users').doc(afterData.stagedDocId || change.after.id)
+    await orgRef.set({ ...afterData.meta, userId: change.after.id, stagedDocId: afterData.stagedDocId || change.after.id })
   }
 })
 
@@ -252,7 +253,10 @@ exports.initFirestore = onCall(async (request) => {
       },
       userId: '',
     }
-    await db.collection('staged-users').doc('organization-registration-template').set(templateUser)
+    const batch = db.batch()
+    batch.set(approvalRef(db, 'organization-registration-template'), { approved: templateUser })
+    batch.set(db.collection('staged-users').doc('organization-registration-template'), templateUser)
+    await batch.commit()
   }
 })
 
@@ -299,7 +303,7 @@ exports.currentUserRegister = onCall(async (request) => {
     return { success: false, message: 'Registration code not found.' }
   }
   else {
-    const stagedUserData = await stagedUser.data()
+    const stagedUserData = await approvedInvitation(db, data.registrationCode)
     let process = false
     if (stagedUserData.isTemplate) {
       process = true
@@ -312,31 +316,41 @@ exports.currentUserRegister = onCall(async (request) => {
     }
     const newRoles = stagedUserData.roles || {}
     const currentUser = await db.collection('users').doc(data.uid).get()
-    const currentUserData = await currentUser.data()
-    const currentRoles = currentUserData.roles || {}
-    const currentUserCollectionPaths = currentUserData.collectionPaths || []
+    if (!currentUser.exists) throw new HttpsError('failed-precondition', 'Register an account before redeeming another invitation.')
     let newRole = {}
     if (stagedUserData.subCreate && Object.keys(stagedUserData.subCreate).length !== 0 && stagedUserData.isTemplate) {
       if (!data.dynamicDocumentFieldValue) {
         return { success: false, message: 'Dynamic document field value is required.' }
       }
       const rootPath = stagedUserData.subCreate.rootPath
-      const newDoc = stagedUserData.subCreate.documentStructure
+      const newDoc = { ...stagedUserData.subCreate.documentStructure }
       newDoc[stagedUserData.subCreate.dynamicDocumentField] = data.dynamicDocumentFieldValue
       const addedDoc = await db.collection(rootPath).add(newDoc)
       await db.collection(rootPath).doc(addedDoc.id).update({ docId: addedDoc.id })
       newRole = { [`${rootPath}-${addedDoc.id}`]: { collectionPath: `${rootPath}-${addedDoc.id}`, role: stagedUserData.subCreate.role } }
     }
-    const combinedRoles = { ...currentRoles, ...newRoles, ...newRole }
-    Object.values(combinedRoles).forEach((role) => {
-      if (!currentUserCollectionPaths.includes(role.collectionPath)) {
-        currentUserCollectionPaths.push(role.collectionPath)
+    // Read and consume the approval with the account write, so two callers
+    // cannot redeem a single invitation or overwrite concurrent role changes.
+    await db.runTransaction(async transaction => {
+      const approvedDoc = await transaction.get(approvalRef(db, data.registrationCode))
+      const latestUser = await transaction.get(currentUser.ref)
+      if (!approvedDoc.exists || (!stagedUserData.isTemplate && approvedDoc.data().approved.userId))
+        throw new HttpsError('permission-denied', 'Invitation is no longer available.')
+      const approved = approvedDoc.data().approved
+      if (!require('node:util').isDeepStrictEqual(approved, stagedUserData))
+        throw new HttpsError('aborted', 'Invitation changed. Please retry registration.')
+      const combinedRoles = { ...latestUser.data().roles, ...newRoles, ...newRole }
+      const collectionPaths = [...new Set([
+        ...Object.values(combinedRoles).map(role => role.collectionPath),
+        ...Object.values(latestUser.data().specialPermissions || {}).map(permission => permission.collectionPath),
+      ])]
+      transaction.set(currentUser.ref, { roles: combinedRoles }, { mergeFields: ['roles'] })
+      transaction.update(db.collection('staged-users').doc(latestUser.data().stagedDocId), { uid: request.auth.uid, roles: combinedRoles, collectionPaths })
+      if (!stagedUserData.isTemplate) {
+        transaction.delete(approvalRef(db, data.registrationCode))
+        transaction.delete(db.collection('staged-users').doc(data.registrationCode))
       }
     })
-    await db.collection('staged-users').doc(currentUserData.stagedDocId).update({ roles: combinedRoles, collectionPaths: currentUserCollectionPaths })
-    if (!stagedUserData.isTemplate) {
-      await db.collection('staged-users').doc(data.registrationCode).delete()
-    }
     return { success: true, message: '' }
   }
 })
@@ -397,6 +411,11 @@ exports.deleteSelf = onCall(async (request) => {
   }
 })
 
+exports.approveUserInvitation = onDocumentCreated({ document: 'staged-users/{docId}', timeoutSeconds: 180 }, async (event) => {
+  const data = event.data.data()
+  if (!data.userId && data.uid) await authorizeStage(db, event.params.docId, data, {}, () => {}, event.data.updateTime)
+})
+
 exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeoutSeconds: 180 }, async (event) => {
   const change = event.data
   const eventId = event.id
@@ -413,10 +432,14 @@ exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeo
     return null
   }
 
-  // Note: we can trust on newData.uid because we are checking in rules that it matches the auth.uid
-  if (newData.userId) {
-    const userRef = db.collection('users').doc(newData.userId)
-    await setUser(userRef, newData, oldData, stagedDocId)
+  const authorization = await authorizeStage(db, stagedDocId, newData, oldData,
+    (transaction, userRef, safe) => setUser(userRef, safe, oldData, stagedDocId, transaction), change.after.updateTime)
+  if (authorization.ignored) {
+    await markProcessed(eventRef)
+    return null
+  }
+  newData = authorization.data
+  if (authorization.mirrored) {
     await markProcessed(eventRef)
   }
   else {
@@ -487,14 +510,15 @@ exports.updateUser = onDocumentUpdated({ document: 'staged-users/{docId}', timeo
   await markProcessed(eventRef)
 })
 
-async function setUser(userRef, newData, oldData, stagedDocId) {
-  const user = await userRef.get()
-  let userUpdate = { meta: newData.meta, stagedDocId }
+async function setUser(userRef, newData, oldData, stagedDocId, transaction) {
+  let userUpdate = { meta: newData.meta, stagedDocId, userId: userRef.id }
 
   if (newData.meta && newData.meta.name) {
     const publicUserRef = db.collection('public-users').doc(stagedDocId)
     const publicMeta = { name: newData.meta.name }
-    publicUserRef.set({ uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths, userId: stagedDocId })
+    const publicData = { uid: newData.uid, meta: publicMeta, collectionPaths: newData.collectionPaths || [], userId: userRef.id }
+    if (transaction) transaction.set(publicUserRef, publicData)
+    else await publicUserRef.set(publicData)
   }
 
   if (Object.prototype.hasOwnProperty.call(newData, 'roles')) {
@@ -504,15 +528,10 @@ async function setUser(userRef, newData, oldData, stagedDocId) {
     userUpdate = { ...userUpdate, specialPermissions: newData.specialPermissions }
   }
 
-  if (!oldData.userId) {
-    userUpdate = { ...userUpdate, userId: newData.uid }
-  }
-  if (!user.exists) {
-    return userRef.set(userUpdate)
-  }
-  else {
-    return userRef.update(userUpdate)
-  }
+  // Replace supplied top-level maps so removed permissions stay removed, while
+  // preserving unrelated fields. One upsert avoids a read-before-create race.
+  if (transaction) return transaction.set(userRef, userUpdate, { mergeFields: Object.keys(userUpdate) })
+  return userRef.set(userUpdate, { mergeFields: Object.keys(userUpdate) })
 }
 
 function markProcessed(eventRef) {

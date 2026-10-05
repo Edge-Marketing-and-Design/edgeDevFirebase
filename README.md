@@ -57,9 +57,48 @@ providing a replacement.
 
 Before releasing this cleanup, run `npm test`, verify package contents exclude
 `src/kv/`, and confirm target consumers have received the Edge migration. The
-package version is `26.9.3`. Publishing, consumer updates, and deployment
+package version is `26.10.1`. Publishing, consumer updates, and deployment
 are separate steps; the shared KV retry payload fix belongs in Edge and is not
 included here.
+
+### User synchronization
+
+Version `26.10.1` fixes missing `userId` values caused by overlapping user-sync
+writes. Each sync uses the destination user document ID and a single upsert that
+replaces supplied top-level fields, including permission maps, while preserving
+unrelated fields. Removed roles and special permissions remain removed.
+
+The server mirror now authorizes changes against the writer's trusted `users`
+permissions in a transaction. It checks additions, changes and removals to both
+permission maps, preserves self-removal, prevents identity redirection, and ignores
+stale staged events. Organization profiles now follow trusted `users` writes.
+Registration inherits a server-approved invitation snapshot stored in protected
+`events/user-sync-approval-{stagedDocId}` documents. Client rules are unchanged.
+
+Consumers must install this release and deploy `edgeFirebase-updateUser`,
+`edgeFirebase-approveUserInvitation`, `edgeFirebase-currentUserRegister`,
+`edgeFirebase-initFirestore`, and `edgeFirebase-userSyncMetaToOrg`. The latter now
+watches `users/{userId}`; ensure its old staged-users trigger is replaced during
+deployment. Existing unclaimed invitations/templates must be reviewed and re-saved
+by an administrator with assignment access to every grant (including `subCreate`)
+before they can be redeemed. New installations seed an approved built-in template.
+Existing templates are deliberately not auto-approved from mutable staging data.
+
+Existing documents missing `userId` are repaired on their next authorized sync;
+accounts needing immediate access require a separate, verified identity repair.
+Unauthorized staging edits fail without changing trusted/public user documents.
+Rejected fields remain in staging and must be removed before subsequent edits can
+sync. This release does not repair previously granted unauthorized permissions.
+
+Run `npm test` and, with an installed Functions Firestore SDK:
+
+```sh
+USER_SYNC_FIRESTORE_SDK=/absolute/path/to/@google-cloud/firestore/build/src/index.js node scripts/test-user-sync.cjs
+```
+
+This runner starts and stops a local emulator with a demo project. It exercises the
+actual handlers and verifies document readback; it does not deploy or access a live
+Firebase project.
 
 ### Login audit log
 

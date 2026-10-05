@@ -2,3 +2,4 @@
 tsconfig.json
 src/*.test.js
 scripts/test-login-audit-rules.cjs
+scripts/test-user-sync.cjs
