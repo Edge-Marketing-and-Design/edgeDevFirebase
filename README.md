@@ -57,48 +57,40 @@ providing a replacement.
 
 Before releasing this cleanup, run `npm test`, verify package contents exclude
 `src/kv/`, and confirm target consumers have received the Edge migration. The
-package version is `26.10.1`. Publishing, consumer updates, and deployment
+package version is `26.10.2`. Publishing, consumer updates, and deployment
 are separate steps; the shared KV retry payload fix belongs in Edge and is not
 included here.
 
 ### User synchronization
 
-Version `26.10.1` fixes missing `userId` values caused by overlapping user-sync
-writes. Each sync uses the destination user document ID and a single upsert that
-replaces supplied top-level fields, including permission maps, while preserving
-unrelated fields. Removed roles and special permissions remain removed.
+Version `26.10.2` retains the original registration contract and fixes the missing
+`userId` race. Every mirror write includes the destination document ID and uses
+`set(..., { mergeFields: Object.keys(userUpdate) })`, replacing supplied top-level
+maps while preserving unrelated fields. No invitation approval record is required.
+This removes the incompatible authorization/approval changes introduced in
+`26.10.1`; do not deploy that version to existing CMS/Hub consumers.
 
-The server mirror now authorizes changes against the writer's trusted `users`
-permissions in a transaction. It checks additions, changes and removals to both
-permission maps, preserves self-removal, prevents identity redirection, and ignores
-stale staged events. Organization profiles now follow trusted `users` writes.
-Registration inherits a server-approved invitation snapshot stored in protected
-`events/user-sync-approval-{stagedDocId}` documents. Client rules are unchanged.
+Install `26.10.2` in the Functions owner and deploy `edgeFirebase-updateUser`.
+A frontend dependency update alone does not update the deployed function.
+An existing account missing `userId` needs its next mirror sync or a separate
+verified identity repair. The mirror also checks client role/special-permission updates against trusted
+`users` permissions, preserving profile edits, self-removal and authorized admin
+assignments. CMS/Admin SDK service-account writes retain their existing behavior.
+No organization-sync or registration callable changes are included.
 
-Consumers must install this release and deploy `edgeFirebase-updateUser`,
-`edgeFirebase-approveUserInvitation`, `edgeFirebase-currentUserRegister`,
-`edgeFirebase-initFirestore`, and `edgeFirebase-userSyncMetaToOrg`. The latter now
-watches `users/{userId}`; ensure its old staged-users trigger is replaced during
-deployment. Existing unclaimed invitations/templates must be reviewed and re-saved
-by an administrator with assignment access to every grant (including `subCreate`)
-before they can be redeemed. New installations seed an approved built-in template.
-Existing templates are deliberately not auto-approved from mutable staging data.
+`updateUser` now uses `onDocumentUpdatedWithAuthContext` to distinguish service
+account writes from client writes. Its trigger event type changes; replace the
+existing `edgeFirebase-updateUser` trigger during rollout rather than assuming
+an in-place event-type update is supported. The package adds no new exported
+function or registration step. No build, publication, consumer update or deployment
+is performed by these tests. This is a targeted registered-user role check, not a
+complete audit of invitation/template creation or every staging-data consumer.
 
-Existing documents missing `userId` are repaired on their next authorized sync;
-accounts needing immediate access require a separate, verified identity repair.
-Unauthorized staging edits fail without changing trusted/public user documents.
-Rejected fields remain in staging and must be removed before subsequent edits can
-sync. This release does not repair previously granted unauthorized permissions.
-
-Run `npm test` and, with an installed Functions Firestore SDK:
+Run `npm test`. For local Firestore readback of the actual handlers, run:
 
 ```sh
 USER_SYNC_FIRESTORE_SDK=/absolute/path/to/@google-cloud/firestore/build/src/index.js node scripts/test-user-sync.cjs
 ```
-
-This runner starts and stops a local emulator with a demo project. It exercises the
-actual handlers and verifies document readback; it does not deploy or access a live
-Firebase project.
 
 ### Login audit log
 

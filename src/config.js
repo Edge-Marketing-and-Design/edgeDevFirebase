@@ -23,6 +23,7 @@ const {
   onDocumentWritten: firebaseOnDocumentWritten,
   onDocumentCreated: firebaseOnDocumentCreated,
   onDocumentUpdated: firebaseOnDocumentUpdated,
+  onDocumentUpdatedWithAuthContext: firebaseOnDocumentUpdatedWithAuthContext,
   onDocumentDeleted: firebaseOnDocumentDeleted,
   Change,
   FirestoreEvent,
@@ -46,6 +47,7 @@ const onMessagePublished = wrapTriggerFactory(firebaseOnMessagePublished, 'pubsu
 const onDocumentWritten = wrapTriggerFactory(firebaseOnDocumentWritten, 'firestore.document.written')
 const onDocumentCreated = wrapTriggerFactory(firebaseOnDocumentCreated, 'firestore.document.created')
 const onDocumentUpdated = wrapTriggerFactory(firebaseOnDocumentUpdated, 'firestore.document.updated')
+const onDocumentUpdatedWithAuthContext = wrapTriggerFactory(firebaseOnDocumentUpdatedWithAuthContext, 'firestore.document.updated')
 const onDocumentDeleted = wrapTriggerFactory(firebaseOnDocumentDeleted, 'firestore.document.deleted')
 const onObjectFinalized = wrapTriggerFactory(firebaseOnObjectFinalized, 'storage.object.finalized')
 const onObjectDeleted = wrapTriggerFactory(firebaseOnObjectDeleted, 'storage.object.deleted')
@@ -71,6 +73,7 @@ module.exports = {
   onDocumentWritten,
   onDocumentCreated,
   onDocumentUpdated,
+  onDocumentUpdatedWithAuthContext,
   onDocumentDeleted,
   Change,
   FirestoreEvent,
